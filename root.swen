@@ -1,0 +1,25 @@
+root {
+    system {}
+    desktop {
+        surface_rect {
+            size (500, 500)
+            background (50, 0, 50, 255)
+            position (0, 0)
+        }
+
+        nodes [
+            rect {
+                size (60, 75)
+                background (15, 20, 150, 100)
+                position (40, 50)
+            }
+            rect {
+                size (50, 50)
+                background (0, 200, 50, 255)
+                position (30, 30)
+            }
+        ]
+
+        workspaces []
+    }
+}

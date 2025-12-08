@@ -1,0 +1,11 @@
+.{
+    .name = .cairo_test,
+    .version = "0.0.0",
+    .minimum_zig_version = "0.15.2",
+    .fingerprint = 0x9ccb7cf56e5b85e5,
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}

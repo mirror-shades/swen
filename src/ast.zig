@@ -1,0 +1,158 @@
+const std = @import("std");
+const helpers = @import("./helpers.zig");
+const types = @import("./types.zig");
+
+pub fn printAST(ast: types.Root) void {
+    printRoot(ast, 0);
+}
+
+fn printRoot(root: types.Root, indent_level: usize) void {
+    printIndent(indent_level);
+    std.debug.print("Root\n", .{});
+    printDesktop(root.desktop, indent_level + 1);
+    printSystem(root.system, indent_level + 1);
+}
+
+fn printDesktop(desktop: types.Desktop, indent_level: usize) void {
+    printIndent(indent_level);
+    std.debug.print("Desktop\n", .{});
+    if (desktop.layout) |layout| {
+        printIndent(indent_level + 1);
+        std.debug.print("layout: {s}\n", .{@tagName(layout)});
+    }
+
+    printIndent(indent_level + 1);
+    std.debug.print("surface_rect:\n", .{});
+    printRect(desktop.surface_rect, indent_level + 2);
+
+    if (desktop.active_workspace) |workspace| {
+        printIndent(indent_level + 1);
+        std.debug.print("active_workspace:\n", .{});
+        printWorkspace(workspace, indent_level + 2);
+    }
+    if (desktop.nodes) |nodes| {
+        printNodes("nodes", nodes, indent_level + 1);
+    }
+    if (desktop.workspaces) |workspaces| {
+        printWorkspaceSlice("workspaces", workspaces, indent_level + 1);
+    }
+}
+
+fn printSystem(system: types.System, indent_level: usize) void {
+    printIndent(indent_level);
+    std.debug.print("System\n", .{});
+    printAppsSlice("apps", system.apps, indent_level + 1);
+}
+
+fn printWorkspaceSlice(label: []const u8, workspaces: []const types.Workspace, indent_level: usize) void {
+    printIndent(indent_level);
+    std.debug.print("{s}:\n", .{label});
+    if (workspaces.len == 0) {
+        printIndent(indent_level + 1);
+        std.debug.print("(empty)\n", .{});
+        return;
+    }
+    for (workspaces, 0..) |workspace, index| {
+        printIndent(indent_level + 1);
+        std.debug.print("Workspace[{d}]\n", .{index});
+        printWorkspace(workspace, indent_level + 2);
+    }
+}
+
+fn printWorkspace(workspace: types.Workspace, indent_level: usize) void {
+    printAppsSlice("apps", workspace.apps, indent_level);
+}
+
+fn printAppsSlice(label: []const u8, apps: ?[]const types.App, indent_level: usize) void {
+    printIndent(indent_level);
+    std.debug.print("{s}:\n", .{label});
+    if (apps == null or apps.?.len == 0) {
+        printIndent(indent_level + 1);
+        std.debug.print("(empty)\n", .{});
+        return;
+    }
+    for (apps.?, 0..) |app, index| {
+        printIndent(indent_level + 1);
+        std.debug.print("App[{d}] \"{s}\"\n", .{ index, app.id });
+        printApp(app, indent_level + 2);
+    }
+}
+
+fn printApp(app: types.App, indent_level: usize) void {
+    printVector("size", app.size, indent_level);
+    printVector("position", app.position, indent_level);
+    printColor("background", app.background, indent_level);
+    printNodes("children", app.children, indent_level);
+}
+
+fn printRect(rect: types.Rect, indent_level: usize) void {
+    if (rect.id) |id| {
+        printIndent(indent_level);
+        std.debug.print("id: {s}\n", .{id});
+    }
+    printOptionalVector("size", rect.size, indent_level);
+    printOptionalVector("position", rect.position, indent_level);
+    printOptionalColor("background", rect.background, indent_level);
+    if (rect.children) |children| {
+        printNodes("children", children, indent_level);
+    }
+}
+
+fn printText(text: types.Text, indent_level: usize) void {
+    printIndent(indent_level);
+    std.debug.print("id: {s}\n", .{text.id});
+    printIndent(indent_level);
+    std.debug.print("body: \"{s}\"\n", .{text.body});
+    printColor("color", text.color, indent_level);
+    printVector("position", text.position, indent_level);
+}
+
+fn printNodes(label: []const u8, nodes: []const types.Node, indent_level: usize) void {
+    printIndent(indent_level);
+    std.debug.print("{s}:\n", .{label});
+    if (nodes.len == 0) {
+        printIndent(indent_level + 1);
+        std.debug.print("(empty)\n", .{});
+        return;
+    }
+    for (nodes, 0..) |node, index| {
+        printIndent(indent_level + 1);
+        std.debug.print("Node[{d}] {s}\n", .{ index, @tagName(node) });
+        switch (node) {
+            .rect => |rect| {
+                printRect(rect, indent_level + 2);
+            },
+            .text => |text| {
+                printText(text, indent_level + 2);
+            },
+        }
+    }
+}
+
+fn printVector(label: []const u8, vector: types.Vector, indent_level: usize) void {
+    printIndent(indent_level);
+    std.debug.print("{s}: ({d}, {d})\n", .{ label, vector.x, vector.y });
+}
+
+fn printOptionalVector(label: []const u8, maybe_vector: ?types.Vector, indent_level: usize) void {
+    if (maybe_vector) |vector| {
+        printVector(label, vector, indent_level);
+    }
+}
+
+fn printColor(label: []const u8, color: types.Color, indent_level: usize) void {
+    printIndent(indent_level);
+    std.debug.print("{s}: rgba({d}, {d}, {d}, {d})\n", .{ label, color.r, color.g, color.b, color.a });
+}
+
+fn printOptionalColor(label: []const u8, maybe_color: ?types.Color, indent_level: usize) void {
+    if (maybe_color) |color| {
+        printColor(label, color, indent_level);
+    }
+}
+
+fn printIndent(indent_level: usize) void {
+    for (0..indent_level) |_| {
+        std.debug.print("  ", .{});
+    }
+}
