@@ -1,12 +1,10 @@
 const std = @import("std");
 const types = @import("./types.zig");
 const Token = types.Token;
-
+const memory = @import("./memory.zig");
 const helpers = @import("./helpers.zig");
 
-pub fn lex(source: []const u8) ![]Token {
-    var tokens: [4096]Token = undefined;
-    var token_index: usize = 0;
+pub fn lex(source: []const u8, tokens: *memory.TokenArray) !void {
     var current_line: usize = 1;
     var current_column: usize = 1;
     var current_offset: usize = 0;
@@ -24,15 +22,15 @@ pub fn lex(source: []const u8) ![]Token {
         }
         if (helpers.isNumber(char)) {
             const end_index = try makeNumber(source, index, current_line, current_column, current_offset);
-            tokens[token_index] = types.makeToken(source[index..end_index], current_line, current_column, current_offset);
-            token_index += 1;
+            const new_token = types.makeToken(source[index..end_index], current_line, current_column, current_offset);
+            tokens.push(new_token);
             index = end_index;
             current_offset = end_index;
             continue;
         }
         if (helpers.isSymbol(char)) {
-            tokens[token_index] = types.makeToken(source[index .. index + 1], current_line, current_column, current_offset);
-            token_index += 1;
+            const new_token = types.makeToken(source[index .. index + 1], current_line, current_column, current_offset);
+            tokens.push(new_token);
             index += 1;
             current_offset = index;
             continue;
@@ -43,15 +41,15 @@ pub fn lex(source: []const u8) ![]Token {
                 tracker += 1;
             }
             if (tracker > index) {
-                tokens[token_index] = types.makeToken(source[index..tracker], current_line, current_column, current_offset);
-                token_index += 1;
+                const new_token = types.makeToken(source[index..tracker], current_line, current_column, current_offset);
+                tokens.push(new_token);
                 index = tracker;
                 continue;
             }
         }
         index += 1;
     }
-    return tokens[0..token_index];
+    tokens.push(types.makeToken("eof", current_line, current_column, current_offset));
 }
 
 fn makeNumber(source: []const u8, index: usize, line: usize, column: usize, offset: usize) !usize {

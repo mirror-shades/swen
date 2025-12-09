@@ -3,13 +3,7 @@ const math = std.math;
 const types = @import("./types.zig");
 const Color = types.Color;
 const Rect = types.Rect;
-
-const DesktopSceneData = struct {
-    surface_rect: Rect,
-    rects: []const Rect,
-};
-
-const max_desktop_rects = 1024;
+const memory = @import("./memory.zig");
 
 const c = @cImport({
     @cDefine("SDL_MAIN_HANDLED", "1");
@@ -17,23 +11,19 @@ const c = @cImport({
     @cInclude("pathfinder.h");
 });
 
-pub fn compose(root: types.Root) !void {
-    var rect_buffer: [max_desktop_rects]Rect = undefined;
-    const desktop_data = prepareDesktopSceneData(root.desktop, &rect_buffer);
-    const surface = desktop_data.surface_rect;
-    const width: usize = if (surface.size.x > 0) surface.size.x else 256;
-    const height: usize = if (surface.size.y > 0) surface.size.y else 256;
+pub fn compose(root: types.Root, rect_buffer: *memory.RectArray) !void {
+    const surface = root.desktop.surface_rect;
+    if (surface.size.x <= 0 or surface.size.y <= 0) {
+        return error.InvalidSurfaceSize;
+    }
 
-    const scene = try buildScene(desktop_data, width, height);
-    try renderScene(scene, width, height, surface.background);
+    prepareDesktopSceneData(root.desktop, rect_buffer);
 
-    std.debug.print(
-        "Rendered Pathfinder scene ({d}x{d}) with {d} rects\n",
-        .{ width, height, desktop_data.rects.len },
-    );
+    const scene = try buildScene(root.desktop, rect_buffer, surface.size.x, surface.size.y);
+    try renderScene(scene, surface.size.x, surface.size.y, surface.background);
 }
 
-fn buildScene(desktop: DesktopSceneData, width: usize, height: usize) !c.PFSceneRef {
+fn buildScene(desktop: types.Desktop, rect_buffer: *memory.RectArray, width: usize, height: usize) !c.PFSceneRef {
     const canvas_size = c.PFVector2F{
         .x = @floatFromInt(width),
         .y = @floatFromInt(height),
@@ -55,10 +45,10 @@ fn buildScene(desktop: DesktopSceneData, width: usize, height: usize) !c.PFScene
     const desktop_color = desktop.surface_rect.background orelse defaultBackgroundColor();
     try fillCanvasRect(canvas, desktop_color, makeCanvasRect(width, height));
 
-    var idx: usize = desktop.rects.len;
+    var idx: usize = rect_buffer.getLength();
     while (idx > 0) {
         idx -= 1;
-        const rect = desktop.rects[idx];
+        const rect = rect_buffer.getItem(idx);
         if (rect.background) |background| {
             try fillCanvasRect(canvas, background, rectToPfRect(rect));
         }
@@ -194,26 +184,18 @@ fn renderScene(
 
 fn prepareDesktopSceneData(
     desktop: types.Desktop,
-    rect_buffer: *[max_desktop_rects]Rect,
-) DesktopSceneData {
-    var count: usize = 0;
+    rect_buffer: *memory.RectArray,
+) void {
     if (desktop.nodes) |nodes| {
         for (nodes) |node| {
-            if (count >= rect_buffer.len) break;
             switch (node) {
                 .rect => |rect| {
-                    rect_buffer[count] = rect;
-                    count += 1;
+                    rect_buffer.push(rect);
                 },
                 else => {},
             }
         }
     }
-
-    return DesktopSceneData{
-        .surface_rect = desktop.surface_rect,
-        .rects = rect_buffer[0..count],
-    };
 }
 
 fn fillCanvasRect(canvas: c.PFCanvasRef, color: Color, pf_rect: c.PFRectF) !void {

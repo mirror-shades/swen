@@ -15,8 +15,8 @@ pub fn build(b: *std.Build) void {
     exe.linkLibC();
     exe.linkSystemLibrary("pathfinder");
     exe.linkSystemLibrary("SDL2");
-    const pathfinder_include = "/tmp/pathfinder-destdir/usr/local/include/pathfinder";
-    const pathfinder_lib = "/tmp/pathfinder-destdir/usr/local/lib";
+    const pathfinder_include = "/usr/local/include/pathfinder";
+    const pathfinder_lib = "/usr/local/lib";
     exe.addIncludePath(.{ .cwd_relative = pathfinder_include });
     exe.addLibraryPath(.{ .cwd_relative = pathfinder_lib });
     exe.root_module.addRPath(.{ .cwd_relative = pathfinder_lib });
