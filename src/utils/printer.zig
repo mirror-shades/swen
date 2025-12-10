@@ -1,9 +1,9 @@
 const std = @import("std");
 const helpers = @import("./helpers.zig");
-const types = @import("./types.zig");
+const types = @import("../core/types.zig");
 const iVector = types.iVector;
 const uVector = types.uVector;
-const memory = @import("./memory.zig");
+const memory = @import("../core/memory.zig");
 
 pub fn printAST(root: *types.Root) void {
     printIndent(0);

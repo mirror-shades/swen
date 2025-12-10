@@ -1,9 +1,9 @@
 const std = @import("std");
-const types = @import("./types.zig");
+const types = @import("../core/types.zig");
 const Token = types.Token;
-const memory = @import("./memory.zig");
-const helpers = @import("./helpers.zig");
-const reporter = @import("./reporter.zig");
+const memory = @import("../core/memory.zig");
+const helpers = @import("../utils/helpers.zig");
+const reporter = @import("../utils/reporter.zig");
 const Error = reporter.Error;
 
 pub fn lex(source: []const u8, tokens: *memory.TokenArray) !void {

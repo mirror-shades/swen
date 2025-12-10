@@ -1,11 +1,11 @@
 const std = @import("std");
 const math = std.math;
-const types = @import("./types.zig");
+const types = @import("../core/types.zig");
 const Color = types.Color;
 const Vector = types.Vector;
 const Rect = types.Rect;
-const memory = @import("./memory.zig");
-const reporter = @import("./reporter.zig");
+const memory = @import("../core/memory.zig");
+const reporter = @import("../utils/reporter.zig");
 const Error = reporter.Error;
 
 const default_font_postscript_name = "LiberationSans";

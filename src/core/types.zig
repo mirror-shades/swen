@@ -1,6 +1,6 @@
 const std = @import("std");
 
-const helpers = @import("./helpers.zig");
+const helpers = @import("../utils/helpers.zig");
 
 pub const Vector = struct { x: i32, y: i32 };
 pub const Color = struct { r: u8, g: u8, b: u8, a: u8 };
