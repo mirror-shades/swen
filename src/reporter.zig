@@ -21,6 +21,7 @@ pub const Error = error{
     InvalidPosition,
     InvalidBackground,
     ExpectedColor,
+    InvalidMatrix,
     // runtime
     InvalidSurfaceSize,
     FontUnavailable,

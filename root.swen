@@ -14,12 +14,14 @@ root {
                 position (100, 150)
             }
             rect {
-                size (600, 200)
-                background (0, 200, 50, 255)
-                position (30, 30)
+                size (600, 200,)
+                background (0, 200, 50, 255,)
+                position (30, 30,)
                 nodes [
 
                     transform {
+                        matrix (0, 0, 0, 0, 0, 0,)
+
                         position (300, 300)
                         nodes [
                             rect {

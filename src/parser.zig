@@ -1,5 +1,6 @@
 const std = @import("std");
 const memory = @import("./memory.zig");
+const helpers = @import("./helpers.zig");
 const reporter = @import("./reporter.zig");
 const Error = reporter.Error;
 const types = @import("./types.zig");
@@ -376,6 +377,7 @@ fn parseTransform(tracker: *TokenTracker, local_position: Vector) !types.Transfo
         .id = null,
         .position = null,
         .local_position = local_position,
+        .matrix = null,
         .children = null,
     };
 
@@ -415,14 +417,14 @@ fn parseTransform(tracker: *TokenTracker, local_position: Vector) !types.Transfo
                 const nodes_slice = try parseNodeArray(tracker, child_local_position);
                 transform.children = nodes_slice;
             },
+            .matrix => {
+                tracker.advance();
+                transform.matrix = try parseMatrix(tracker);
+            },
             else => {
                 std.debug.print("unexpected token found at line {d} column {d} offset {d} in transform parsing: {t} {s}\n", .{ token.span.line, token.span.column, token.span.offset, token.tag, token.literal });
                 tracker.advance();
             },
-        }
-
-        if (transform.position == null) {
-            return reporter.throwError("expected position in transform node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
         }
     }
 
@@ -440,6 +442,39 @@ fn parseTransform(tracker: *TokenTracker, local_position: Vector) !types.Transfo
 
     transform.local_position = local_position;
     return transform;
+}
+
+fn parseMatrix(tracker: *TokenTracker) !types.Matrix {
+    if (!consumeTag(tracker, .lparen)) {
+        return reporter.throwError("expected opening parenthesis after matrix keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedLeftParen);
+    }
+
+    var matrix = types.Matrix{ .a = 0, .b = 0, .c = 0, .d = 0, .e = 0, .f = 0 };
+    for (0..6) |i| {
+        switch (i) {
+            0 => matrix.a = try consumeNumber(f32, tracker, "matrix a"),
+            1 => matrix.b = try consumeNumber(f32, tracker, "matrix b"),
+            2 => matrix.c = try consumeNumber(f32, tracker, "matrix c"),
+            3 => matrix.d = try consumeNumber(f32, tracker, "matrix d"),
+            4 => matrix.e = try consumeNumber(f32, tracker, "matrix e"),
+            5 => matrix.f = try consumeNumber(f32, tracker, "matrix f"),
+            else => {
+                return reporter.throwError("expected matrix element", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.InvalidMatrix);
+            },
+        }
+        if (i < 5 and !consumeTag(tracker, .comma)) {
+            return reporter.throwError("expected comma after matrix element", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedComma);
+        }
+    }
+
+    if (tracker.peek().tag == .comma) {
+        tracker.advance();
+    }
+    if (!consumeTag(tracker, .rparen)) {
+        return reporter.throwError("expected closing parenthesis after matrix", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedRightParen);
+    }
+
+    return matrix;
 }
 
 fn parseTextBody(tracker: *TokenTracker, local_position: Vector) !types.Text {
@@ -531,8 +566,13 @@ fn parseVector(tracker: *TokenTracker, field: []const u8) !types.Vector {
     const y_label = std.fmt.bufPrint(&y_buf, "{s} y", .{field}) catch field;
     const y = try consumeNumber(i32, tracker, y_label);
 
+    if (tracker.peek().tag == .comma) {
+        tracker.advance();
+    }
+
     if (!consumeTag(tracker, .rparen)) {
-        return reporter.throwError("expected closing parenthesis after {s} keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedRightParen);
+        const label = std.fmt.bufPrint(&y_buf, "expected closing parenthesis after {s}", .{field}) catch field;
+        return reporter.throwError(label, tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedRightParen);
     }
 
     return types.Vector{ .x = x, .y = y };
@@ -559,6 +599,10 @@ fn parseColor(tracker: *TokenTracker) !types.Color {
     }
 
     const a = try consumeNumber(u8, tracker, "background a");
+
+    if (tracker.peek().tag == .comma) {
+        tracker.advance();
+    }
 
     if (!consumeTag(tracker, .rparen)) {
         return reporter.throwError("expected closing parenthesis after background keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedRightParen);
@@ -587,16 +631,27 @@ fn parseLayout(tracker: *TokenTracker) !?types.Layout {
 }
 
 fn consumeNumber(comptime T: type, tracker: *TokenTracker, field: []const u8) !T {
-    if (tracker.peek().tag != .number) {
-        var buf: [128]u8 = undefined;
-        const msg = std.fmt.bufPrint(&buf, "expected number for {s}", .{field}) catch "expected number";
-        return reporter.throwError(msg, tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedNumber);
-    }
     const number_token = tracker.peek();
-    const value = std.fmt.parseInt(T, number_token.literal, 10) catch {
-        var buf: [128]u8 = undefined;
-        const msg = std.fmt.bufPrint(&buf, "invalid number for {s}", .{field}) catch "invalid number";
-        return reporter.throwError(msg, number_token.span.line, number_token.span.column, number_token.span.offset, Error.ExpectedNumber);
+    const literal = number_token.literal;
+    const value = switch (@typeInfo(T)) {
+        .float => std.fmt.parseFloat(T, literal) catch {
+            var buf: [128]u8 = undefined;
+            const msg = std.fmt.bufPrint(&buf, "invalid number for {s}", .{field}) catch "invalid number";
+            return reporter.throwError(msg, number_token.span.line, number_token.span.column, number_token.span.offset, Error.ExpectedNumber);
+        },
+        .int => switch (number_token.tag) {
+            .float => {
+                var buf: [128]u8 = undefined;
+                const msg = std.fmt.bufPrint(&buf, "invalid number for {s}", .{field}) catch "invalid number";
+                return reporter.throwError(msg, number_token.span.line, number_token.span.column, number_token.span.offset, Error.ExpectedNumber);
+            },
+            else => std.fmt.parseInt(T, literal, 10) catch {
+                var buf: [128]u8 = undefined;
+                const msg = std.fmt.bufPrint(&buf, "invalid number for {s}", .{field}) catch "invalid number";
+                return reporter.throwError(msg, number_token.span.line, number_token.span.column, number_token.span.offset, Error.ExpectedNumber);
+            },
+        },
+        else => @compileError("consumeNumber only supports integer and float types"),
     };
     tracker.advance();
     return value;
@@ -615,7 +670,6 @@ fn initDesktop() types.Desktop {
         .active_workspace = null,
         .surface_rect = initRect(),
         .nodes = null,
-        .layout = null,
         .workspaces = null,
     };
 }

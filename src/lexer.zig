@@ -24,8 +24,8 @@ pub fn lex(source: []const u8, tokens: *memory.TokenArray) !void {
         }
         if (char == '-') {
             if (helpers.isNumber(source[index + 1])) {
-                const end_index = try makeNumber(source, index, current_line, current_column, current_offset);
-                const new_token = types.makeToken(source[index..end_index], current_line, current_column, current_offset);
+                const end_index = try findNumber(source, index, current_line, current_column, current_offset);
+                const new_token = try types.makeNumberToken(current_line, current_column, current_offset, source[index..end_index]);
                 tokens.push(new_token);
                 index = end_index;
                 current_offset = end_index;
@@ -48,8 +48,8 @@ pub fn lex(source: []const u8, tokens: *memory.TokenArray) !void {
             continue;
         }
         if (helpers.isNumber(char)) {
-            const end_index = try makeNumber(source, index, current_line, current_column, current_offset);
-            const new_token = types.makeToken(source[index..end_index], current_line, current_column, current_offset);
+            const end_index = try findNumber(source, index, current_line, current_column, current_offset);
+            const new_token = try types.makeNumberToken(current_line, current_column, current_offset, source[index..end_index]);
             tokens.push(new_token);
             index = end_index;
             current_offset = end_index;
@@ -93,7 +93,7 @@ fn makeString(source: []const u8, index: usize, line: usize, column: usize, offs
     return reporter.throwError("string not terminated", line, column, offset, Error.InvalidString);
 }
 
-fn makeNumber(source: []const u8, index: usize, line: usize, column: usize, offset: usize) !usize {
+fn findNumber(source: []const u8, index: usize, line: usize, column: usize, offset: usize) !usize {
     var is_float = false;
     var tracker = index;
     while (tracker < source.len) {

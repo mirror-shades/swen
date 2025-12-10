@@ -15,11 +15,6 @@ pub fn printAST(root: *types.Root) void {
 fn printDesktop(desktop: types.Desktop, indent_level: usize) void {
     printIndent(indent_level);
     std.debug.print("Desktop\n", .{});
-    if (desktop.layout) |layout| {
-        printIndent(indent_level + 1);
-        std.debug.print("layout: {s}\n", .{@tagName(layout)});
-    }
-
     printIndent(indent_level + 1);
     std.debug.print("surface_rect:\n", .{});
     printRect(desktop.surface_rect, indent_level + 2);

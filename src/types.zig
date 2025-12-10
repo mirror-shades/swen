@@ -4,6 +4,7 @@ const helpers = @import("./helpers.zig");
 
 pub const Vector = struct { x: i32, y: i32 };
 pub const Color = struct { r: u8, g: u8, b: u8, a: u8 };
+pub const Matrix = struct { a: f32, b: f32, c: f32, d: f32, e: f32, f: f32 };
 
 pub const Root = struct {
     desktop: Desktop,
@@ -13,16 +14,8 @@ pub const Root = struct {
 pub const Desktop = struct {
     surface_rect: Rect,
     active_workspace: ?Workspace,
-    layout: ?Layout,
     nodes: ?[]Node,
     workspaces: ?[]Workspace,
-};
-
-pub const Layout = enum {
-    grid,
-    stack,
-    float,
-    monocle,
 };
 
 pub const Workspace = struct {
@@ -54,6 +47,7 @@ pub const Transform = struct {
     id: ?[]const u8,
     position: ?Vector,
     local_position: Vector,
+    matrix: ?Matrix,
     children: ?[]Node,
 };
 
@@ -113,11 +107,13 @@ pub const TokenTag = enum {
     // literals types
     identifier,
     string,
-    number,
+    int,
+    float,
     boolean,
     nothing,
     array,
     object,
+    matrix,
 
     // symbols
     rbrace,
@@ -168,6 +164,11 @@ fn get_tag(word: []const u8) !TokenTag {
         'i' => {
             if (std.mem.eql(u8, word, "id")) {
                 tag = .id;
+            }
+        },
+        'm' => {
+            if (std.mem.eql(u8, word, "matrix")) {
+                tag = .matrix;
             }
         },
         'n' => {
@@ -253,43 +254,10 @@ fn get_tag(word: []const u8) !TokenTag {
 }
 
 pub fn makeToken(literal: []const u8, line: usize, column: usize, offset: usize) Token {
-    if (literal[0] == '-') {
-        if (helpers.isNumber(literal[1])) {
-            return Token{
-                .literal = literal,
-                .tag = .number,
-                .span = Span{
-                    .line = line,
-                    .column = column,
-                    .offset = offset,
-                },
-            };
-        } else {
-            return Token{
-                .literal = literal,
-                .tag = .identifier,
-                .span = Span{
-                    .line = line,
-                    .column = column,
-                    .offset = offset,
-                },
-            };
-        }
-    }
     if (helpers.isSymbol(literal[0])) {
         return Token{
             .literal = literal,
             .tag = try get_tag(literal),
-            .span = Span{
-                .line = line,
-                .column = column,
-                .offset = offset,
-            },
-        };
-    } else if (helpers.isNumber(literal[0])) {
-        return Token{
-            .literal = literal,
-            .tag = .number,
             .span = Span{
                 .line = line,
                 .column = column,
@@ -308,4 +276,18 @@ pub fn makeToken(literal: []const u8, line: usize, column: usize, offset: usize)
             },
         };
     }
+}
+
+pub fn makeNumberToken(line: usize, column: usize, offset: usize, potential_number: []const u8) !Token {
+    var is_float = false;
+    for (potential_number) |char| {
+        if (char == '.') {
+            if (is_float) {
+                return makeToken(potential_number, line, column, offset);
+            }
+            is_float = true;
+        }
+    }
+    const new_token = makeToken(potential_number, line, column, offset);
+    return new_token;
 }
