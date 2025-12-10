@@ -79,32 +79,30 @@ pub const Token = struct {
 };
 
 pub const TokenTag = enum {
-    // keywords
+    // root nodes
     root,
     desktop,
     system,
+
+    // node types
+    rect,
+    text,
+    container,
+    wayland_surface,
+    transform,
+    clip,
+
+    // properties
     workspaces,
-    layout,
     app,
+    nodes,
+    id,
     size,
     position,
     background,
-    child,
-    rect,
-    nodes,
     surface_rect,
-    id,
-    text,
-    body,
-    color,
-    parent,
-    end,
-    grid,
-    stack,
-    float,
-    monocle,
 
-    // other token types
+    // literals types
     identifier,
     string,
     number,
@@ -112,9 +110,8 @@ pub const TokenTag = enum {
     nothing,
     array,
     object,
-    function,
-    method,
-    property,
+
+    // symbols
     rbrace,
     lbrace,
     rbracket,
@@ -125,135 +122,118 @@ pub const TokenTag = enum {
     colon,
     semicolon,
     dot,
+
+    // special
     eof,
 };
 
 fn get_tag(word: []const u8) !TokenTag {
-    if (word[0] == 'r') {
-        if (std.mem.eql(u8, word, "root")) {
-            return .root;
-        } else if (std.mem.eql(u8, word, "rect")) {
-            return .rect;
-        }
+    const first_char = word[0];
+    var tag: TokenTag = .identifier;
+    switch (first_char) {
+        'r' => {
+            if (std.mem.eql(u8, word, "root")) {
+                tag = .root;
+            } else if (std.mem.eql(u8, word, "rect")) {
+                tag = .rect;
+            }
+        },
+        'n' => {
+            if (std.mem.eql(u8, word, "nodes")) {
+                tag = .nodes;
+            }
+        },
+
+        'd' => {
+            if (std.mem.eql(u8, word, "desktop")) {
+                tag = .desktop;
+            }
+        },
+        's' => {
+            if (std.mem.eql(u8, word, "system")) {
+                tag = .system;
+            } else if (std.mem.eql(u8, word, "size")) {
+                tag = .size;
+            } else if (std.mem.eql(u8, word, "surface_rect")) {
+                tag = .surface_rect;
+            }
+        },
+        'w' => {
+            if (std.mem.eql(u8, word, "workspaces")) {
+                tag = .workspaces;
+            } else if (std.mem.eql(u8, word, "wayland_surface")) {
+                tag = .wayland_surface;
+            }
+        },
+        'a' => {
+            if (std.mem.eql(u8, word, "app")) {
+                tag = .app;
+            }
+        },
+        'b' => {
+            if (std.mem.eql(u8, word, "background")) {
+                tag = .background;
+            }
+        },
+        'i' => {
+            if (std.mem.eql(u8, word, "id")) {
+                tag = .id;
+            }
+        },
+        't' => {
+            if (std.mem.eql(u8, word, "text")) {
+                tag = .text;
+            } else if (std.mem.eql(u8, word, "transform")) {
+                tag = .transform;
+            }
+        },
+        'c' => {
+            if (std.mem.eql(u8, word, "container")) {
+                tag = .container;
+            } else if (std.mem.eql(u8, word, "clip")) {
+                tag = .clip;
+            }
+        },
+        'p' => {
+            if (std.mem.eql(u8, word, "position")) {
+                tag = .position;
+            }
+        },
+        '[' => {
+            tag = .lbracket;
+        },
+        ']' => {
+            tag = .rbracket;
+        },
+        '{' => {
+            tag = .lbrace;
+        },
+        '}' => {
+            tag = .rbrace;
+        },
+        '(' => {
+            tag = .lparen;
+        },
+        ')' => {
+            tag = .rparen;
+        },
+        ',' => {
+            tag = .comma;
+        },
+        ':' => {
+            tag = .colon;
+        },
+        ';' => {
+            tag = .semicolon;
+        },
+        '.' => {
+            tag = .dot;
+        },
+        else => {
+            tag = .identifier;
+        },
     }
-    if (word[0] == 'n') {
-        if (std.mem.eql(u8, word, "nodes")) {
-            return .nodes;
-        }
-    }
-    if (word[0] == 'd') {
-        if (std.mem.eql(u8, word, "desktop")) {
-            return .desktop;
-        }
-    }
-    if (word[0] == 's') {
-        if (std.mem.eql(u8, word, "system")) {
-            return .system;
-        } else if (std.mem.eql(u8, word, "stack")) {
-            return .stack;
-        } else if (std.mem.eql(u8, word, "size")) {
-            return .size;
-        } else if (std.mem.eql(u8, word, "surface_rect")) {
-            return .surface_rect;
-        }
-    }
-    if (word[0] == 'w') {
-        if (std.mem.eql(u8, word, "workspaces")) {
-            return .workspaces;
-        }
-    }
-    if (word[0] == 'l') {
-        if (std.mem.eql(u8, word, "layout")) {
-            return .layout;
-        }
-    }
-    if (word[0] == 'a') {
-        if (std.mem.eql(u8, word, "app")) {
-            return .app;
-        }
-    }
-    if (word[0] == 'e') {
-        if (std.mem.eql(u8, word, "end")) {
-            return .end;
-        }
-    }
-    if (word[0] == 'b') {
-        if (std.mem.eql(u8, word, "background")) {
-            return .background;
-        } else if (std.mem.eql(u8, word, "body")) {
-            return .body;
-        }
-    }
-    if (word[0] == 'c') {
-        if (std.mem.eql(u8, word, "child")) {
-            return .child;
-        } else if (std.mem.eql(u8, word, "color")) {
-            return .color;
-        }
-    }
-    if (word[0] == 'i') {
-        if (std.mem.eql(u8, word, "id")) {
-            return .id;
-        }
-    }
-    if (word[0] == 't') {
-        if (std.mem.eql(u8, word, "text")) {
-            return .text;
-        }
-    }
-    if (word[0] == 'p') {
-        if (std.mem.eql(u8, word, "position")) {
-            return .position;
-        } else if (std.mem.eql(u8, word, "parent")) {
-            return .parent;
-        }
-    }
-    if (word[0] == 'g') {
-        if (std.mem.eql(u8, word, "grid")) {
-            return .grid;
-        }
-    }
-    if (word[0] == 'f') {
-        if (std.mem.eql(u8, word, "float")) {
-            return .float;
-        }
-    }
-    if (word[0] == 'm') {
-        if (std.mem.eql(u8, word, "monocle")) {
-            return .monocle;
-        }
-    }
-    if (word[0] == '[') {
-        return .lbracket;
-    }
-    if (word[0] == ']') {
-        return .rbracket;
-    }
-    if (word[0] == '{') {
-        return .lbrace;
-    }
-    if (word[0] == '}') {
-        return .rbrace;
-    }
-    if (word[0] == '(') {
-        return .lparen;
-    }
-    if (word[0] == ')') {
-        return .rparen;
-    }
-    if (word[0] == ',') {
-        return .comma;
-    }
-    if (word[0] == ':') {
-        return .colon;
-    }
-    if (word[0] == ';') {
-        return .semicolon;
-    }
-    if (word[0] == '.') {
-        return .dot;
-    }
-    return .identifier;
+    return tag;
 }
 
 pub fn makeToken(literal: []const u8, line: usize, column: usize, offset: usize) Token {

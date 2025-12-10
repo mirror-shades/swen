@@ -1,16 +1,13 @@
 const std = @import("std");
 const helpers = @import("./helpers.zig");
 const types = @import("./types.zig");
+const memory = @import("./memory.zig");
 
-pub fn printAST(ast: types.Root) void {
-    printRoot(ast, 0);
-}
-
-fn printRoot(root: types.Root, indent_level: usize) void {
-    printIndent(indent_level);
+pub fn printAST(root: *types.Root) void {
+    printIndent(0);
     std.debug.print("Root\n", .{});
-    printDesktop(root.desktop, indent_level + 1);
-    printSystem(root.system, indent_level + 1);
+    printDesktop(root.desktop, 1);
+    printSystem(root.system, 1);
 }
 
 fn printDesktop(desktop: types.Desktop, indent_level: usize) void {
@@ -25,10 +22,10 @@ fn printDesktop(desktop: types.Desktop, indent_level: usize) void {
     std.debug.print("surface_rect:\n", .{});
     printRect(desktop.surface_rect, indent_level + 2);
 
-    if (desktop.active_workspace) |workspace| {
+    if (desktop.active_workspace != null) {
         printIndent(indent_level + 1);
         std.debug.print("active_workspace:\n", .{});
-        printWorkspace(workspace, indent_level + 2);
+        printWorkspace(desktop.active_workspace.?, indent_level + 2);
     }
     if (desktop.nodes) |nodes| {
         printNodes("nodes", nodes, indent_level + 1);

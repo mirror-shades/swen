@@ -105,10 +105,6 @@ fn parseDesktop(
                 const workspaces_slice = try parseWorkspaceArray(tracker.tokens, &tracker.index, token);
                 desktop.workspaces = workspaces_slice;
             },
-            .layout => {
-                tracker.advance();
-                desktop.layout = try parseLayout(tracker.tokens.getArray(), &tracker.index, token);
-            },
             .rbrace => {
                 closed = true;
                 tracker.advance();

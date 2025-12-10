@@ -16,8 +16,8 @@ pub fn main() !void {
     try lexer.lex(source, &token_array);
 
     var node_array = memory.NodeArray.init();
-    const root = try parser.parse(&token_array, &node_array);
-    ast.printAST(root);
+    var root = try parser.parse(&token_array, &node_array);
+    ast.printAST(&root);
 
     var rect_array = memory.RectArray.init();
     try compositor.compose(root, &rect_array);
