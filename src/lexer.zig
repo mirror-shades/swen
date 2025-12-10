@@ -3,6 +3,8 @@ const types = @import("./types.zig");
 const Token = types.Token;
 const memory = @import("./memory.zig");
 const helpers = @import("./helpers.zig");
+const reporter = @import("./reporter.zig");
+const Error = reporter.Error;
 
 pub fn lex(source: []const u8, tokens: *memory.TokenArray) !void {
     var current_line: usize = 1;
@@ -36,6 +38,15 @@ pub fn lex(source: []const u8, tokens: *memory.TokenArray) !void {
                 continue;
             }
         }
+        if (char == '"') {
+            const end_index = try makeString(source, index, current_line, current_column, current_offset);
+            // skips the opening quote and the closing quote
+            const new_token = types.makeToken(source[index + 1 .. end_index - 1], current_line, current_column, current_offset);
+            tokens.push(new_token);
+            index = end_index;
+            current_offset = end_index;
+            continue;
+        }
         if (helpers.isNumber(char)) {
             const end_index = try makeNumber(source, index, current_line, current_column, current_offset);
             const new_token = types.makeToken(source[index..end_index], current_line, current_column, current_offset);
@@ -68,15 +79,27 @@ pub fn lex(source: []const u8, tokens: *memory.TokenArray) !void {
     tokens.push(types.makeToken("eof", current_line, current_column, current_offset));
 }
 
+fn makeString(source: []const u8, index: usize, line: usize, column: usize, offset: usize) !usize {
+    var tracker = index + 1;
+    while (tracker < source.len) {
+        if (source[tracker] == '\n') {
+            return reporter.throwError("string not terminated", line, column, offset, Error.InvalidString);
+        }
+        if (source[tracker] == '"') {
+            return tracker + 1;
+        }
+        tracker += 1;
+    }
+    return reporter.throwError("string not terminated", line, column, offset, Error.InvalidString);
+}
+
 fn makeNumber(source: []const u8, index: usize, line: usize, column: usize, offset: usize) !usize {
     var is_float = false;
     var tracker = index;
     while (tracker < source.len) {
         if (source[tracker] == '.') {
             if (is_float) {
-                std.debug.print("error: invalid number at line {d} column {d} offset {d}\n", .{ line, column, offset });
-                std.debug.print("multiple dots in number\n", .{});
-                return error.InvalidNumber;
+                return reporter.throwError("multiple dots in number", line, column, offset, Error.InvalidNumber);
             }
             is_float = true;
             tracker += 1;
@@ -88,9 +111,7 @@ fn makeNumber(source: []const u8, index: usize, line: usize, column: usize, offs
         } else if (source[tracker] == '-') {
             tracker += 1;
         } else {
-            std.debug.print("error: invalid number at line {d} column {d} offset {d}\n", .{ line, column, offset });
-            std.debug.print("expected number after dot\n", .{});
-            return error.InvalidNumber;
+            return reporter.throwError("expected number after dot", line, column, offset, Error.InvalidNumber);
         }
     }
     return tracker;

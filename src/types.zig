@@ -41,17 +41,19 @@ pub const App = struct {
     children: []Node,
 };
 
-pub const NodeTag = enum {
-    rect,
-    text,
-};
-
 pub const Rect = struct {
     id: ?[]const u8,
     size: Vector,
     position: Vector,
     local_position: Vector,
     background: ?Color,
+    children: ?[]Node,
+};
+
+pub const Container = struct {
+    id: ?[]const u8,
+    position: ?Vector,
+    local_position: Vector,
     children: ?[]Node,
 };
 
@@ -64,9 +66,10 @@ pub const Text = struct {
     text_size: ?u16,
 };
 
-pub const Node = union(NodeTag) {
+pub const Node = union(enum) {
     rect: Rect,
     text: Text,
+    container: Container,
 };
 
 const Span = struct {
@@ -239,6 +242,9 @@ fn get_tag(word: []const u8) !TokenTag {
         },
         '.' => {
             tag = .dot;
+        },
+        '"' => {
+            tag = .string;
         },
         else => {
             tag = .identifier;

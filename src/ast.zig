@@ -114,6 +114,17 @@ fn printText(text: types.Text, indent_level: usize) void {
     }
 }
 
+fn printContainer(container: types.Container, indent_level: usize) void {
+    if (container.id) |id| {
+        printIndent(indent_level);
+        std.debug.print("id: {s}\n", .{id});
+    }
+    printOptionalVector("position", container.position, indent_level);
+    if (container.children) |children| {
+        printNodes("children", children, indent_level);
+    }
+}
+
 fn printNodes(label: []const u8, nodes: []const types.Node, indent_level: usize) void {
     printIndent(indent_level);
     std.debug.print("{s}:\n", .{label});
@@ -131,6 +142,9 @@ fn printNodes(label: []const u8, nodes: []const types.Node, indent_level: usize)
             },
             .text => |text| {
                 printText(text, indent_level + 2);
+            },
+            .container => |container| {
+                printContainer(container, indent_level + 2);
             },
         }
     }

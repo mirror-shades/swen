@@ -5,6 +5,8 @@ const Color = types.Color;
 const Vector = types.Vector;
 const Rect = types.Rect;
 const memory = @import("./memory.zig");
+const reporter = @import("./reporter.zig");
+const Error = reporter.Error;
 
 const default_font_postscript_name = "LiberationSans";
 const default_text_size: u16 = 14;
@@ -18,7 +20,7 @@ const c = @cImport({
 pub fn compose(root: types.Root, rect_buffer: *memory.RectArray) !void {
     const surface = root.desktop.surface_rect;
     if (surface.size.x <= 0 or surface.size.y <= 0) {
-        return error.InvalidSurfaceSize;
+        return reporter.throwRuntimeError("desktop surface must have a positive size", Error.InvalidSurfaceSize);
     }
 
     prepareDesktopSceneData(root.desktop, rect_buffer);
@@ -35,13 +37,13 @@ fn buildScene(desktop: types.Desktop, rect_buffer: *memory.RectArray, size: Vect
 
     const font_context = c.PFCanvasFontContextCreateWithSystemSource();
     if (font_context == null) {
-        return error.FontContextUnavailable;
+        return reporter.throwRuntimeError("failed to create canvas font context", Error.FontContextUnavailable);
     }
     defer c.PFCanvasFontContextRelease(font_context);
 
     const canvas = c.PFCanvasCreate(font_context, &canvas_size);
     if (canvas == null) {
-        return error.CanvasCreateFailed;
+        return reporter.throwRuntimeError("failed to create canvas", Error.CanvasCreateFailed);
     }
     var canvas_owned = true;
     defer if (canvas_owned) c.PFCanvasDestroy(canvas);
@@ -65,7 +67,7 @@ fn buildScene(desktop: types.Desktop, rect_buffer: *memory.RectArray, size: Vect
 
     const scene = c.PFCanvasCreateScene(canvas);
     if (scene == null) {
-        return error.SceneCreateFailed;
+        return reporter.throwRuntimeError("failed to create scene from canvas", Error.SceneCreateFailed);
     }
     canvas_owned = false;
 
@@ -78,7 +80,7 @@ fn renderScene(
     desktop_background: ?Color,
 ) !void {
     if (c.SDL_Init(c.SDL_INIT_VIDEO) != 0) {
-        return error.SDLInitFailed;
+        return reporter.throwRuntimeError("SDL initialization failed", Error.SDLInitFailed);
     }
     defer c.SDL_Quit();
 
@@ -102,18 +104,18 @@ fn renderScene(
         c.SDL_WINDOW_OPENGL | c.SDL_WINDOW_SHOWN,
     );
     if (window == null) {
-        return error.WindowCreateFailed;
+        return reporter.throwRuntimeError("failed to create SDL window", Error.WindowCreateFailed);
     }
     defer c.SDL_DestroyWindow(window);
 
     const gl_context = c.SDL_GL_CreateContext(window);
     if (gl_context == null) {
-        return error.GLContextCreateFailed;
+        return reporter.throwRuntimeError("failed to create OpenGL context", Error.GLContextCreateFailed);
     }
     defer c.SDL_GL_DeleteContext(gl_context);
 
     if (c.SDL_GL_MakeCurrent(window, gl_context) != 0) {
-        return error.GLContextMakeCurrentFailed;
+        return reporter.throwRuntimeError("failed to activate OpenGL context", Error.GLContextMakeCurrentFailed);
     }
 
     _ = c.SDL_GL_SetSwapInterval(1);
@@ -130,21 +132,21 @@ fn renderScene(
 
     const dest_framebuffer = c.PFGLDestFramebufferCreateFullWindow(&window_size);
     if (dest_framebuffer == null) {
-        return error.GLDestFramebufferCreateFailed;
+        return reporter.throwRuntimeError("failed to create destination framebuffer", Error.GLDestFramebufferCreateFailed);
     }
     var dest_owned = true;
     defer if (dest_owned) c.PFGLDestFramebufferDestroy(dest_framebuffer);
 
     const gl_device = c.PFGLDeviceCreate(c.PF_GL_VERSION_GL4, 0);
     if (gl_device == null) {
-        return error.GLDeviceCreateFailed;
+        return reporter.throwRuntimeError("failed to create OpenGL device", Error.GLDeviceCreateFailed);
     }
     var device_owned = true;
     defer if (device_owned) c.PFGLDeviceDestroy(gl_device);
 
     const resources = c.PFEmbeddedResourceLoaderCreate();
     if (resources == null) {
-        return error.ResourceLoaderCreateFailed;
+        return reporter.throwRuntimeError("failed to create embedded resource loader", Error.ResourceLoaderCreateFailed);
     }
     defer c.PFResourceLoaderDestroy(resources);
 
@@ -153,7 +155,7 @@ fn renderScene(
 
     const renderer = c.PFGLRendererCreate(gl_device, resources, &renderer_mode, &renderer_options);
     if (renderer == null) {
-        return error.RendererCreateFailed;
+        return reporter.throwRuntimeError("failed to create renderer", Error.RendererCreateFailed);
     }
     defer c.PFGLRendererDestroy(renderer);
     dest_owned = false;
@@ -161,7 +163,7 @@ fn renderScene(
 
     const build_options = c.PFBuildOptionsCreate();
     if (build_options == null) {
-        return error.BuildOptionsCreateFailed;
+        return reporter.throwRuntimeError("failed to create build options", Error.BuildOptionsCreateFailed);
     }
     defer c.PFBuildOptionsDestroy(build_options);
 
@@ -170,7 +172,7 @@ fn renderScene(
         c.PF_RENDERER_LEVEL_D3D11,
     );
     if (scene_proxy == null) {
-        return error.SceneProxyCreateFailed;
+        return reporter.throwRuntimeError("failed to create scene proxy", Error.SceneProxyCreateFailed);
     }
     defer c.PFSceneProxyDestroy(scene_proxy);
     scene_owned = false;
@@ -231,7 +233,7 @@ fn setCanvasFillColor(canvas: c.PFCanvasRef, color: Color) !void {
     var pf_color = toPfColor(color);
     const fill_style = c.PFFillStyleCreateColor(&pf_color);
     if (fill_style == null) {
-        return error.FillStyleCreateFailed;
+        return reporter.throwRuntimeError("failed to create fill style", Error.FillStyleCreateFailed);
     }
     defer c.PFFillStyleDestroy(fill_style);
 
@@ -303,13 +305,13 @@ fn makeRendererOptions(
 
 fn setGlAttribute(attr: c.SDL_GLattr, value: i32) !void {
     if (c.SDL_GL_SetAttribute(attr, value) != 0) {
-        return error.SDLGLAttributeFailed;
+        return reporter.throwRuntimeError("failed to set SDL GL attribute", Error.SDLGLAttributeFailed);
     }
 }
 
 fn toI32(value: usize) !i32 {
     if (value > math.maxInt(i32)) {
-        return error.DimensionTooLarge;
+        return reporter.throwRuntimeError("value exceeds 32-bit integer range", Error.DimensionTooLarge);
     }
     return @as(i32, @intCast(value));
 }
@@ -333,7 +335,7 @@ fn setCanvasFont(canvas: c.PFCanvasRef, font_name: []const u8) !void {
     const name_ptr: [*c]const u8 = @ptrCast(font_name.ptr);
     const result = c.PFCanvasSetFontByPostScriptName(canvas, name_ptr, font_name.len);
     if (result != 0) {
-        return error.FontUnavailable;
+        return reporter.throwRuntimeError("font is not available", Error.FontUnavailable);
     }
 }
 
@@ -347,6 +349,11 @@ fn drawTextNodes(canvas: c.PFCanvasRef, nodes: []const types.Node) !void {
             },
             .text => |text| {
                 try drawSingleText(canvas, text);
+            },
+            .container => |container| {
+                if (container.children) |children| {
+                    try drawTextNodes(canvas, children);
+                }
             },
         }
     }

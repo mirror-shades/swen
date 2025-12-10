@@ -18,8 +18,12 @@ root {
                 background (0, 200, 50, 255)
                 position (30, 30)
                 nodes [
+                    container {
+                        position (300, 300)
+                        nodes []
+                    }
                     rect {
-                        size (100,100)
+                        size (275,100)
                         position (-10, -10)
                         background (255, 255, 255, 255)
                     }

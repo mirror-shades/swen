@@ -2,7 +2,7 @@
     .name = .swen,
     .version = "0.0.0",
     .minimum_zig_version = "0.15.2",
-    .fingerprint = 0x9ccb7cf56e5b85e5,
+    .fingerprint = 0xbbf07d06c44bc199,
     .paths = .{
         "build.zig",
         "build.zig.zon",
