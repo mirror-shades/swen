@@ -3,7 +3,10 @@ const memory = @import("./memory.zig");
 const types = @import("./types.zig");
 const Token = types.Token;
 const TokenTag = types.TokenTag;
+const Color = types.Color;
 const Vector = types.Vector;
+const Text = types.Text;
+const Rect = types.Rect;
 
 const TokenTracker = struct {
     tokens: *memory.TokenArray,
@@ -33,15 +36,14 @@ const TokenTracker = struct {
 
 pub fn parse(token_array: *memory.TokenArray, nodes: *memory.NodeArray) !types.Root {
     if (token_array.getLength() == 0 or token_array.getItem(0).tag != .root) {
-        return error.InvalidRootDeclaration;
+        return getParserError("expected root keyword", token_array.getItem(0).span.line, token_array.getItem(0).span.column, token_array.getItem(0).span.offset);
     }
     var tracker = TokenTracker.init(token_array, nodes);
     const root_token = tracker.peek();
     tracker.advance();
 
     if (tracker.peek().tag != .lbrace) {
-        declarationError("root", root_token, "expected opening brace after root keyword", .{});
-        return error.InvalidRootDeclaration;
+        return getParserError("expected opening brace after root keyword", root_token.span.line, root_token.span.column, root_token.span.offset);
     }
 
     var desktop = initDesktop();
@@ -70,8 +72,7 @@ pub fn parse(token_array: *memory.TokenArray, nodes: *memory.NodeArray) !types.R
     }
 
     if (!closed) {
-        declarationError("root", root_token, "expected closing brace after root declaration", .{});
-        return error.InvalidRootDeclaration;
+        return getParserError("expected closing brace after root declaration", root_token.span.line, root_token.span.column, root_token.span.offset);
     }
 
     return types.Root{
@@ -84,8 +85,7 @@ fn parseDesktop(
     tracker: *TokenTracker,
 ) !types.Desktop {
     if (!consumeTag(tracker, .lbrace)) {
-        declarationError("desktop", tracker.peek(), "expected opening brace after desktop keyword", .{});
-        return error.InvalidDesktopDeclaration;
+        return getParserError("expected opening brace after desktop keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
 
     var desktop = initDesktop();
@@ -119,8 +119,7 @@ fn parseDesktop(
     }
 
     if (!closed) {
-        declarationError("desktop", tracker.peek(), "expected closing brace after desktop declaration", .{});
-        return error.InvalidDesktopDeclaration;
+        return getParserError("expected closing brace after desktop declaration", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
 
     return desktop;
@@ -128,8 +127,7 @@ fn parseDesktop(
 
 fn parseSystem(tracker: *TokenTracker) !types.System {
     if (!consumeTag(tracker, .lbrace)) {
-        declarationError("system", tracker.peek(), "expected opening brace after system keyword", .{});
-        return error.InvalidSystemDeclaration;
+        return getParserError("expected opening brace after system keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
 
     var depth: usize = 1;
@@ -148,8 +146,7 @@ fn parseSystem(tracker: *TokenTracker) !types.System {
     }
 
     if (depth != 0) {
-        declarationError("system", tracker.peek(), "expected closing brace after system declaration", .{});
-        return error.InvalidSystemDeclaration;
+        return getParserError("expected closing brace after system declaration", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
 
     return initSystem();
@@ -157,8 +154,7 @@ fn parseSystem(tracker: *TokenTracker) !types.System {
 
 fn parseNodeArray(tracker: *TokenTracker, local_position: Vector) ![]types.Node {
     if (!consumeTag(tracker, .lbracket)) {
-        declarationError("desktop", tracker.peek(), "expected opening bracket after nodes keyword", .{});
-        return error.InvalidDesktopDeclaration;
+        return getParserError("expected opening bracket after nodes keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
 
     var closed = false;
@@ -182,8 +178,7 @@ fn parseNodeArray(tracker: *TokenTracker, local_position: Vector) ![]types.Node 
     }
 
     if (!closed) {
-        declarationError("desktop", tracker.peek(), "expected closing bracket after nodes declaration", .{});
-        return error.InvalidDesktopDeclaration;
+        return getParserError("expected closing bracket after nodes declaration", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
 
     return tracker.nodes.getArray();
@@ -195,8 +190,7 @@ fn parseWorkspaceArray(
     workspaces_token: Token,
 ) ![]types.Workspace {
     if (!consumeTag(tracker, .lbracket)) {
-        declarationError("desktop", workspaces_token, "expected opening bracket after workspaces keyword", .{});
-        return error.InvalidDesktopDeclaration;
+        return getParserError("expected opening bracket after workspaces keyword", workspaces_token.span.line, workspaces_token.span.column, workspaces_token.span.offset);
     }
 
     var depth: usize = 1;
@@ -215,17 +209,15 @@ fn parseWorkspaceArray(
     }
 
     if (depth != 0) {
-        declarationError("desktop", workspaces_token, "expected closing bracket after workspaces declaration", .{});
-        return error.InvalidDesktopDeclaration;
+        return getParserError("expected closing bracket after workspaces declaration", workspaces_token.span.line, workspaces_token.span.column, workspaces_token.span.offset);
     }
 
     return &[_]types.Workspace{};
 }
 
-fn parseRectBody(tracker: *TokenTracker, local_position: Vector) error{ InvalidRectDeclaration, InvalidDesktopDeclaration }!types.Rect {
+fn parseRectBody(tracker: *TokenTracker, local_position: Vector) !Rect {
     if (!consumeTag(tracker, .lbrace)) {
-        declarationError("rect", tracker.peek(), "expected opening brace after rect keyword", .{});
-        return error.InvalidRectDeclaration;
+        return getParserError("expected opening brace after rect keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
 
     var rect = initRect();
@@ -244,24 +236,20 @@ fn parseRectBody(tracker: *TokenTracker, local_position: Vector) error{ InvalidR
             .id => {
                 tracker.advance();
                 if (rect.id != null) {
-                    declarationError("rect", tracker.peek(), "expected only one id after rect keyword", .{});
-                    return error.InvalidRectDeclaration;
+                    return getParserError("expected only one id after rect keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
                 }
                 if (tracker.peek().tag != .identifier and tracker.peek().tag != .string) {
-                    declarationError("rect", tracker.peek(), "expected id value after id keyword", .{});
-                    return error.InvalidRectDeclaration;
+                    return getParserError("expected id value after id keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
                 }
                 if (tracker.peek().tag != .identifier and tracker.peek().tag != .string) {
-                    declarationError("rect", tracker.peek(), "expected identifier after id keyword", .{});
-                    return error.InvalidRectDeclaration;
+                    return getParserError("expected identifier after id keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
                 }
                 rect.id = tracker.peek().literal;
                 tracker.advance();
             },
             .size => {
                 if (size_set) {
-                    declarationError("rect", tracker.peek(), "expected only one size after rect keyword", .{});
-                    return error.InvalidRectDeclaration;
+                    return getParserError("expected only one size after rect keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
                 }
                 tracker.advance();
                 rect.size = try parseVector(tracker, "size");
@@ -269,8 +257,7 @@ fn parseRectBody(tracker: *TokenTracker, local_position: Vector) error{ InvalidR
             },
             .position => {
                 if (position_set) {
-                    declarationError("rect", tracker.peek(), "expected only one position after rect keyword", .{});
-                    return error.InvalidRectDeclaration;
+                    return getParserError("expected only one position after rect keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
                 }
                 tracker.advance();
                 rect.position = try parseVector(tracker, "position");
@@ -278,20 +265,60 @@ fn parseRectBody(tracker: *TokenTracker, local_position: Vector) error{ InvalidR
             },
             .background => {
                 if (rect.background != null) {
-                    declarationError("rect", tracker.peek(), "expected only one background after rect keyword", .{});
-                    return error.InvalidRectDeclaration;
+                    return getParserError("expected only one background after rect keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
                 }
                 tracker.advance();
                 rect.background = try parseColor(tracker);
             },
             .nodes => {
                 tracker.advance();
+
+                if (!consumeTag(tracker, .lbracket)) {
+                    return getParserError("expected opening bracket after nodes keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
+                }
+
                 const child_local_position = Vector{
                     .x = local_position.x + rect.position.x,
                     .y = local_position.y + rect.position.y,
                 };
-                const nodes_slice = try parseNodeArray(tracker, child_local_position);
-                rect.children = nodes_slice;
+
+                const start_index = tracker.nodes.getLength();
+                var closed_children = false;
+                while (tracker.peek().tag != .eof) {
+                    const child_token = tracker.peek();
+                    switch (child_token.tag) {
+                        .rect => {
+                            tracker.advance();
+                            const child_rect = try parseRectBody(tracker, child_local_position);
+                            tracker.nodes.push(types.Node{ .rect = child_rect });
+                        },
+                        .text => {
+                            tracker.advance();
+                            const child_text = try parseTextBody(tracker, child_local_position);
+                            tracker.nodes.push(types.Node{ .text = child_text });
+                        },
+                        .rbracket => {
+                            closed_children = true;
+                            tracker.advance();
+                            break;
+                        },
+                        else => {
+                            tracker.advance();
+                        },
+                    }
+                }
+
+                if (!closed_children) {
+                    return getParserError("expected closing bracket after nodes declaration", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
+                }
+
+                const all_nodes = tracker.nodes.getArray();
+                rect.children = all_nodes[start_index..all_nodes.len];
+            },
+            .text => {
+                tracker.advance();
+                const text = try parseTextBody(tracker, local_position);
+                tracker.nodes.push(types.Node{ .text = text });
             },
             else => {
                 tracker.advance();
@@ -300,25 +327,88 @@ fn parseRectBody(tracker: *TokenTracker, local_position: Vector) error{ InvalidR
     }
 
     if (!closed) {
-        declarationError("rect", tracker.peek(), "expected closing brace after rect declaration", .{});
-        return error.InvalidRectDeclaration;
+        return getParserError("expected closing brace after rect declaration", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
     if (!size_set) {
-        declarationError("rect", tracker.peek(), "expected size after rect keyword", .{});
-        return error.InvalidRectDeclaration;
+        return getParserError("expected size after rect keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
     if (!position_set) {
-        declarationError("rect", tracker.peek(), "expected position after rect keyword", .{});
-        return error.InvalidRectDeclaration;
+        return getParserError("expected position after rect keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
 
     return rect;
 }
 
+fn parseTextBody(tracker: *TokenTracker, local_position: Vector) !types.Text {
+    if (!consumeTag(tracker, .lbrace)) {
+        return getParserError("expected opening brace after text keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
+    }
+
+    var text = Text{
+        .id = null,
+        .body = "",
+        .color = Color{ .r = 0, .g = 0, .b = 0, .a = 255 },
+        .position = null,
+        .local_position = local_position,
+        .text_size = null,
+    };
+
+    var closed = false;
+    while (tracker.peek().tag != .eof) {
+        const token = tracker.peek();
+        switch (token.tag) {
+            .position => {
+                tracker.advance();
+                text.position = try parseVector(tracker, "position");
+            },
+            .body => {
+                tracker.advance();
+                text.body = tracker.peek().literal;
+                tracker.advance();
+            },
+            .color => {
+                tracker.advance();
+                text.color = try parseColor(tracker);
+            },
+            .text_size => {
+                tracker.advance();
+                text.text_size = try consumeNumber(u16, tracker, "text size");
+                if (text.text_size == 0) {
+                    return getParserError("expected positive text size after text size keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
+                }
+            },
+            .rbrace => {
+                closed = true;
+                tracker.advance();
+                break;
+            },
+            else => {
+                std.debug.print("unexpected token found at line {d} column {d} offset {d} in text parsing: {t} {s}\n", .{ token.span.line, token.span.column, token.span.offset, token.tag, token.literal });
+                tracker.advance();
+            },
+        }
+    }
+
+    if (!closed) {
+        return getParserError("expected closing brace after text declaration", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
+    }
+
+    if (text.position == null) {
+        return getParserError("expected position in text node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
+    }
+    if (text.text_size == null) {
+        return getParserError("expected text size in text node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
+    }
+    if (text.body.len == 0) {
+        return getParserError("expected text after body keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
+    }
+    text.local_position = local_position;
+    return text;
+}
+
 fn parseVector(tracker: *TokenTracker, field: []const u8) !types.Vector {
     if (!consumeTag(tracker, .lparen)) {
-        declarationError("rect", tracker.peek(), "expected opening parenthesis after {s} keyword", .{field});
-        return error.InvalidRectDeclaration;
+        return getParserError("expected opening parenthesis after {s} keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
 
     var x_buf: [32]u8 = undefined;
@@ -326,8 +416,7 @@ fn parseVector(tracker: *TokenTracker, field: []const u8) !types.Vector {
     const x = try consumeNumber(i32, tracker, x_label);
 
     if (!consumeTag(tracker, .comma)) {
-        declarationError("rect", tracker.peek(), "expected comma after {s} x", .{field});
-        return error.InvalidRectDeclaration;
+        return getParserError("expected comma after {s} x", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
 
     var y_buf: [32]u8 = undefined;
@@ -335,8 +424,7 @@ fn parseVector(tracker: *TokenTracker, field: []const u8) !types.Vector {
     const y = try consumeNumber(i32, tracker, y_label);
 
     if (!consumeTag(tracker, .rparen)) {
-        declarationError("rect", tracker.peek(), "expected closing parenthesis after {s} keyword", .{field});
-        return error.InvalidRectDeclaration;
+        return getParserError("expected closing parenthesis after {s} keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
 
     return types.Vector{ .x = x, .y = y };
@@ -344,33 +432,28 @@ fn parseVector(tracker: *TokenTracker, field: []const u8) !types.Vector {
 
 fn parseColor(tracker: *TokenTracker) !types.Color {
     if (!consumeTag(tracker, .lparen)) {
-        declarationError("rect", tracker.peek(), "expected opening parenthesis after background keyword", .{});
-        return error.InvalidRectDeclaration;
+        return getParserError("expected opening parenthesis after background keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
 
     const r = try consumeNumber(u8, tracker, "background r");
     if (!consumeTag(tracker, .comma)) {
-        declarationError("rect", tracker.peek(), "expected comma after background r", .{});
-        return error.InvalidRectDeclaration;
+        return getParserError("expected comma after background r", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
 
     const g = try consumeNumber(u8, tracker, "background g");
     if (!consumeTag(tracker, .comma)) {
-        declarationError("rect", tracker.peek(), "expected comma after background g", .{});
-        return error.InvalidRectDeclaration;
+        return getParserError("expected comma after background g", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
 
     const b = try consumeNumber(u8, tracker, "background b");
     if (!consumeTag(tracker, .comma)) {
-        declarationError("rect", tracker.peek(), "expected comma after background b", .{});
-        return error.InvalidRectDeclaration;
+        return getParserError("expected comma after background b", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
 
     const a = try consumeNumber(u8, tracker, "background a");
 
     if (!consumeTag(tracker, .rparen)) {
-        declarationError("rect", tracker.peek(), "expected closing parenthesis after background keyword", .{});
-        return error.InvalidRectDeclaration;
+        return getParserError("expected closing parenthesis after background keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
 
     return types.Color{ .r = r, .g = g, .b = b, .a = a };
@@ -378,8 +461,7 @@ fn parseColor(tracker: *TokenTracker) !types.Color {
 
 fn parseLayout(tracker: *TokenTracker) !?types.Layout {
     if (tracker.peek().tag != .identifier) {
-        declarationError("desktop", tracker.peek(), "expected layout value", .{});
-        return error.InvalidDesktopDeclaration;
+        return getParserError("expected layout value", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
     const value_token = tracker.peek();
     var layout: ?types.Layout = null;
@@ -389,8 +471,7 @@ fn parseLayout(tracker: *TokenTracker) !?types.Layout {
         .float => layout = .float,
         .monocle => layout = .monocle,
         else => {
-            declarationError("desktop", tracker.peek(), "expected grid|stack|float|monocle after layout keyword", .{});
-            return error.InvalidDesktopDeclaration;
+            return getParserError("expected grid|stack|float|monocle after layout keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
         },
     }
     tracker.advance();
@@ -399,16 +480,15 @@ fn parseLayout(tracker: *TokenTracker) !?types.Layout {
 
 fn consumeNumber(comptime T: type, tracker: *TokenTracker, field: []const u8) !T {
     if (tracker.peek().tag != .number) {
-        declarationError("rect", tracker.peek(), "expected number for {s}", .{field});
-        return error.InvalidRectDeclaration;
+        var buf: [128]u8 = undefined;
+        const msg = std.fmt.bufPrint(&buf, "expected number for {s}", .{field}) catch "expected number";
+        return getParserError(msg, tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset);
     }
     const number_token = tracker.peek();
     const value = std.fmt.parseInt(T, number_token.literal, 10) catch {
-        std.debug.print(
-            "error: invalid number for {s} at line {d} column {d}\n",
-            .{ field, number_token.span.line, number_token.span.column },
-        );
-        return error.InvalidRectDeclaration;
+        var buf: [128]u8 = undefined;
+        const msg = std.fmt.bufPrint(&buf, "invalid number for {s}", .{field}) catch "invalid number";
+        return getParserError(msg, number_token.span.line, number_token.span.column, number_token.span.offset);
     };
     tracker.advance();
     return value;
@@ -422,14 +502,6 @@ fn consumeTag(tracker: *TokenTracker, tag: TokenTag) bool {
     return true;
 }
 
-fn declarationError(label: []const u8, token: Token, comptime fmt: []const u8, args: anytype) void {
-    std.debug.print(
-        "error: invalid {s} declaration at line {d} column {d} offset {d}\n",
-        .{ label, token.span.line, token.span.column, token.span.offset },
-    );
-    std.debug.print(fmt ++ "\n", args);
-}
-
 fn initDesktop() types.Desktop {
     return types.Desktop{
         .active_workspace = null,
@@ -440,8 +512,8 @@ fn initDesktop() types.Desktop {
     };
 }
 
-fn initRect() types.Rect {
-    return types.Rect{
+fn initRect() Rect {
+    return Rect{
         .id = null,
         .size = types.Vector{ .x = 0, .y = 0 },
         .local_position = types.Vector{ .x = 0, .y = 0 },
@@ -455,4 +527,10 @@ fn initSystem() types.System {
     return types.System{
         .apps = null,
     };
+}
+
+fn getParserError(issue: []const u8, line: usize, column: usize, offset: usize) error{ParserError} {
+    std.debug.print("error: {s}\n", .{issue});
+    std.debug.print("\t at line {d} column {d} offset {d}\n", .{ line, column, offset });
+    return error.ParserError;
 }

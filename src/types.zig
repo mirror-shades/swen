@@ -56,10 +56,12 @@ pub const Rect = struct {
 };
 
 pub const Text = struct {
-    id: []const u8,
+    id: ?[]const u8,
     body: []const u8,
     color: Color,
-    position: Vector,
+    position: ?Vector,
+    local_position: Vector,
+    text_size: ?u16,
 };
 
 pub const Node = union(NodeTag) {
@@ -99,9 +101,12 @@ pub const TokenTag = enum {
     nodes,
     id,
     size,
+    text_size,
     position,
     background,
     surface_rect,
+    body,
+    color,
 
     // literals types
     identifier,
@@ -132,11 +137,35 @@ fn get_tag(word: []const u8) !TokenTag {
     const first_char = word[0];
     var tag: TokenTag = .identifier;
     switch (first_char) {
-        'r' => {
-            if (std.mem.eql(u8, word, "root")) {
-                tag = .root;
-            } else if (std.mem.eql(u8, word, "rect")) {
-                tag = .rect;
+        'a' => {
+            if (std.mem.eql(u8, word, "app")) {
+                tag = .app;
+            }
+        },
+        'b' => {
+            if (std.mem.eql(u8, word, "background")) {
+                tag = .background;
+            } else if (std.mem.eql(u8, word, "body")) {
+                tag = .body;
+            }
+        },
+        'c' => {
+            if (std.mem.eql(u8, word, "container")) {
+                tag = .container;
+            } else if (std.mem.eql(u8, word, "clip")) {
+                tag = .clip;
+            } else if (std.mem.eql(u8, word, "color")) {
+                tag = .color;
+            }
+        },
+        'd' => {
+            if (std.mem.eql(u8, word, "desktop")) {
+                tag = .desktop;
+            }
+        },
+        'i' => {
+            if (std.mem.eql(u8, word, "id")) {
+                tag = .id;
             }
         },
         'n' => {
@@ -144,10 +173,16 @@ fn get_tag(word: []const u8) !TokenTag {
                 tag = .nodes;
             }
         },
-
-        'd' => {
-            if (std.mem.eql(u8, word, "desktop")) {
-                tag = .desktop;
+        'p' => {
+            if (std.mem.eql(u8, word, "position")) {
+                tag = .position;
+            }
+        },
+        'r' => {
+            if (std.mem.eql(u8, word, "root")) {
+                tag = .root;
+            } else if (std.mem.eql(u8, word, "rect")) {
+                tag = .rect;
             }
         },
         's' => {
@@ -166,38 +201,13 @@ fn get_tag(word: []const u8) !TokenTag {
                 tag = .wayland_surface;
             }
         },
-        'a' => {
-            if (std.mem.eql(u8, word, "app")) {
-                tag = .app;
-            }
-        },
-        'b' => {
-            if (std.mem.eql(u8, word, "background")) {
-                tag = .background;
-            }
-        },
-        'i' => {
-            if (std.mem.eql(u8, word, "id")) {
-                tag = .id;
-            }
-        },
         't' => {
             if (std.mem.eql(u8, word, "text")) {
                 tag = .text;
             } else if (std.mem.eql(u8, word, "transform")) {
                 tag = .transform;
-            }
-        },
-        'c' => {
-            if (std.mem.eql(u8, word, "container")) {
-                tag = .container;
-            } else if (std.mem.eql(u8, word, "clip")) {
-                tag = .clip;
-            }
-        },
-        'p' => {
-            if (std.mem.eql(u8, word, "position")) {
-                tag = .position;
+            } else if (std.mem.eql(u8, word, "text_size")) {
+                tag = .text_size;
             }
         },
         '[' => {

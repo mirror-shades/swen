@@ -6,6 +6,9 @@ const Vector = types.Vector;
 const Rect = types.Rect;
 const memory = @import("./memory.zig");
 
+const default_font_postscript_name = "LiberationSans";
+const default_text_size: u16 = 14;
+
 const c = @cImport({
     @cDefine("SDL_MAIN_HANDLED", "1");
     @cInclude("SDL2/SDL.h");
@@ -42,6 +45,7 @@ fn buildScene(desktop: types.Desktop, rect_buffer: *memory.RectArray, size: Vect
     }
     var canvas_owned = true;
     defer if (canvas_owned) c.PFCanvasDestroy(canvas);
+    try initializeCanvasTextState(canvas);
 
     const desktop_color = desktop.surface_rect.background orelse defaultBackgroundColor();
     try fillCanvasRect(canvas, desktop_color, makeCanvasRect(size));
@@ -53,6 +57,10 @@ fn buildScene(desktop: types.Desktop, rect_buffer: *memory.RectArray, size: Vect
         if (rect.background) |background| {
             try fillCanvasRect(canvas, background, rectToPfRect(rect));
         }
+    }
+
+    if (desktop.nodes) |nodes| {
+        try drawTextNodes(canvas, nodes);
     }
 
     const scene = c.PFCanvasCreateScene(canvas);
@@ -214,6 +222,12 @@ fn pushRectWithChildren(rect: types.Rect, rect_buffer: *memory.RectArray) void {
 }
 
 fn fillCanvasRect(canvas: c.PFCanvasRef, color: Color, pf_rect: c.PFRectF) !void {
+    try setCanvasFillColor(canvas, color);
+    var rect_copy = pf_rect;
+    c.PFCanvasFillRect(canvas, &rect_copy);
+}
+
+fn setCanvasFillColor(canvas: c.PFCanvasRef, color: Color) !void {
     var pf_color = toPfColor(color);
     const fill_style = c.PFFillStyleCreateColor(&pf_color);
     if (fill_style == null) {
@@ -222,9 +236,6 @@ fn fillCanvasRect(canvas: c.PFCanvasRef, color: Color, pf_rect: c.PFRectF) !void
     defer c.PFFillStyleDestroy(fill_style);
 
     c.PFCanvasSetFillStyle(canvas, fill_style);
-
-    var rect_copy = pf_rect;
-    c.PFCanvasFillRect(canvas, &rect_copy);
 }
 
 fn rectToPfRect(rect: Rect) c.PFRectF {
@@ -310,4 +321,58 @@ fn glFunctionLoader(name: [*c]const u8, userdata: ?*anyopaque) callconv(.c) ?*co
 
 fn defaultBackgroundColor() Color {
     return Color{ .r = 0, .g = 0, .b = 0, .a = 255 };
+}
+
+fn initializeCanvasTextState(canvas: c.PFCanvasRef) !void {
+    try setCanvasFont(canvas, default_font_postscript_name);
+    c.PFCanvasSetTextAlign(canvas, c.PF_TEXT_ALIGN_LEFT);
+    c.PFCanvasSetTextBaseline(canvas, c.PF_TEXT_BASELINE_TOP);
+}
+
+fn setCanvasFont(canvas: c.PFCanvasRef, font_name: []const u8) !void {
+    const name_ptr: [*c]const u8 = @ptrCast(font_name.ptr);
+    const result = c.PFCanvasSetFontByPostScriptName(canvas, name_ptr, font_name.len);
+    if (result != 0) {
+        return error.FontUnavailable;
+    }
+}
+
+fn drawTextNodes(canvas: c.PFCanvasRef, nodes: []const types.Node) !void {
+    for (nodes) |node| {
+        switch (node) {
+            .rect => |rect| {
+                if (rect.children) |children| {
+                    try drawTextNodes(canvas, children);
+                }
+            },
+            .text => |text| {
+                try drawSingleText(canvas, text);
+            },
+        }
+    }
+}
+
+fn drawSingleText(canvas: c.PFCanvasRef, text: types.Text) !void {
+    const world_position = textWorldPosition(text);
+    const pf_position = c.PFVector2F{
+        .x = @as(f32, @floatFromInt(world_position.x)),
+        .y = @as(f32, @floatFromInt(world_position.y)),
+    };
+
+    const font_size_value = @as(u16, text.text_size orelse default_text_size);
+    const font_size = @as(f32, @floatFromInt(font_size_value));
+    c.PFCanvasSetFontSize(canvas, font_size);
+
+    try setCanvasFillColor(canvas, text.color);
+
+    const text_ptr: [*c]const u8 = @ptrCast(text.body.ptr);
+    c.PFCanvasFillText(canvas, text_ptr, text.body.len, &pf_position);
+}
+
+fn textWorldPosition(text: types.Text) Vector {
+    const pos = text.position.?;
+    return .{
+        .x = text.local_position.x + pos.x,
+        .y = text.local_position.y + pos.y,
+    };
 }

@@ -98,12 +98,20 @@ fn printRect(rect: types.Rect, indent_level: usize) void {
 }
 
 fn printText(text: types.Text, indent_level: usize) void {
-    printIndent(indent_level);
-    std.debug.print("id: {s}\n", .{text.id});
+    if (text.id) |id| {
+        printIndent(indent_level);
+        std.debug.print("id: {s}\n", .{id});
+    }
     printIndent(indent_level);
     std.debug.print("body: \"{s}\"\n", .{text.body});
     printColor("color", text.color, indent_level);
-    printVector("position", text.position, indent_level);
+    if (text.position) |position| {
+        printVector("position", position, indent_level);
+    }
+    if (text.text_size) |text_size| {
+        printIndent(indent_level);
+        std.debug.print("text size: {d}\n", .{text_size});
+    }
 }
 
 fn printNodes(label: []const u8, nodes: []const types.Node, indent_level: usize) void {
