@@ -17,6 +17,10 @@ pub const Error = error{
     InvalidTextSize,
     InvalidNumber,
     InvalidString,
+    InvalidSize,
+    InvalidPosition,
+    InvalidBackground,
+    ExpectedColor,
     // runtime
     InvalidSurfaceSize,
     FontUnavailable,

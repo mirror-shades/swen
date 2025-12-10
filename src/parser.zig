@@ -179,10 +179,10 @@ fn parseNodeArray(tracker: *TokenTracker, local_position: Vector) Error![]types.
                 const text = try parseTextBody(tracker, local_position);
                 tracker.nodes.push(types.Node{ .text = text });
             },
-            .container => {
+            .transform => {
                 tracker.advance();
-                const container = try parseContainer(tracker, local_position);
-                tracker.nodes.push(types.Node{ .container = container });
+                const transform = try parseTransform(tracker, local_position);
+                tracker.nodes.push(types.Node{ .transform = transform });
             },
             .rbracket => {
                 closed = true;
@@ -242,8 +242,6 @@ fn parseRectBody(tracker: *TokenTracker, local_position: Vector) Error!Rect {
 
     var rect = initRect();
     rect.local_position = local_position;
-    var size_set = false;
-    var position_set = false;
     var closed = false;
     while (tracker.peek().tag != .eof) {
         const token = tracker.peek();
@@ -255,37 +253,31 @@ fn parseRectBody(tracker: *TokenTracker, local_position: Vector) Error!Rect {
             },
             .id => {
                 tracker.advance();
-                if (rect.id != null) {
-                    return reporter.throwError("expected only one id after rect keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.DuplicateProperty);
+                if (rect.id) |_| {
+                    if (tracker.peek().tag != .string) {
+                        rect.id = tracker.peek().literal;
+                        tracker.advance();
+                    } else if (tracker.peek().tag == .string) {
+                        return reporter.throwError("expected id value after id keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedIdentifier);
+                    }
                 }
-                if (tracker.peek().tag != .string) {
-                    return reporter.throwError("expected id value after id keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedIdentifier);
-                }
-                rect.id = tracker.peek().literal;
-                tracker.advance();
             },
             .size => {
-                if (size_set) {
-                    return reporter.throwError("expected only one size after rect keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.DuplicateProperty);
-                }
                 tracker.advance();
                 rect.size = try parseVector(tracker, "size");
-                size_set = true;
             },
             .position => {
-                if (position_set) {
-                    return reporter.throwError("expected only one position after rect keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.DuplicateProperty);
-                }
                 tracker.advance();
                 rect.position = try parseVector(tracker, "position");
-                position_set = true;
             },
             .background => {
-                if (rect.background != null) {
-                    return reporter.throwError("expected only one background after rect keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.DuplicateProperty);
-                }
                 tracker.advance();
-                rect.background = try parseColor(tracker);
+                if (tracker.peek().tag == .lparen) {
+                    rect.background = try parseColor(tracker);
+                } else {
+                    std.debug.print("expected background value after background keyword at line {d} column {d} offset {d} in rect body parsing: {t} {s}\n", .{ tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, tracker.peek().tag, tracker.peek().literal });
+                    return reporter.throwError("expected background value after background keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedColor);
+                }
             },
             .nodes => {
                 tracker.advance();
@@ -294,59 +286,63 @@ fn parseRectBody(tracker: *TokenTracker, local_position: Vector) Error!Rect {
                     return reporter.throwError("expected opening bracket after nodes keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedLeftBracket);
                 }
 
-                const child_local_position = Vector{
-                    .x = local_position.x + rect.position.x,
-                    .y = local_position.y + rect.position.y,
-                };
+                if (rect.position) |position| {
+                    const child_local_position = Vector{
+                        .x = local_position.x + position.x,
+                        .y = local_position.y + position.y,
+                    };
 
-                const start_index = tracker.nodes.getLength();
-                var closed_children = false;
-                while (tracker.peek().tag != .eof) {
-                    const child_token = tracker.peek();
-                    switch (child_token.tag) {
-                        .rect => {
-                            tracker.advance();
-                            const child_rect = try parseRectBody(tracker, child_local_position);
-                            tracker.nodes.push(types.Node{ .rect = child_rect });
-                        },
-                        .text => {
-                            tracker.advance();
-                            const child_text = try parseTextBody(tracker, child_local_position);
-                            tracker.nodes.push(types.Node{ .text = child_text });
-                        },
-                        .rbracket => {
-                            closed_children = true;
-                            tracker.advance();
-                            break;
-                        },
-                        .container => {
-                            tracker.advance();
-                            const child_container = try parseContainer(tracker, child_local_position);
-                            tracker.nodes.push(types.Node{ .container = child_container });
-                        },
-                        else => {
-                            std.debug.print("unexpected token found in rect body parsing at line {d} column {d} offset {d} in rect body parsing: {t} {s}\n", .{ child_token.span.line, child_token.span.column, child_token.span.offset, child_token.tag, child_token.literal });
-                            tracker.advance();
-                        },
+                    const start_index = tracker.nodes.getLength();
+                    var closed_children = false;
+                    while (tracker.peek().tag != .eof) {
+                        const child_token = tracker.peek();
+                        switch (child_token.tag) {
+                            .rect => {
+                                tracker.advance();
+                                const child_rect = try parseRectBody(tracker, child_local_position);
+                                tracker.nodes.push(types.Node{ .rect = child_rect });
+                            },
+                            .text => {
+                                tracker.advance();
+                                const child_text = try parseTextBody(tracker, child_local_position);
+                                tracker.nodes.push(types.Node{ .text = child_text });
+                            },
+                            .rbracket => {
+                                closed_children = true;
+                                tracker.advance();
+                                break;
+                            },
+                            .transform => {
+                                tracker.advance();
+                                const child_transform = try parseTransform(tracker, child_local_position);
+                                tracker.nodes.push(types.Node{ .transform = child_transform });
+                            },
+                            else => {
+                                std.debug.print("unexpected token found in rect body parsing at line {d} column {d} offset {d} in rect body parsing: {t} {s}\n", .{ child_token.span.line, child_token.span.column, child_token.span.offset, child_token.tag, child_token.literal });
+                                tracker.advance();
+                            },
+                        }
                     }
-                }
 
-                if (!closed_children) {
-                    return reporter.throwError("expected closing bracket after nodes declaration", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedRightBracket);
-                }
+                    if (!closed_children) {
+                        return reporter.throwError("expected closing bracket after nodes declaration", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedRightBracket);
+                    }
 
-                const all_nodes = tracker.nodes.getArray();
-                rect.children = all_nodes[start_index..all_nodes.len];
+                    const all_nodes = tracker.nodes.getArray();
+                    rect.children = all_nodes[start_index..all_nodes.len];
+                } else {
+                    return reporter.throwError("expected position before nodes in rect", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
+                }
             },
             .text => {
                 tracker.advance();
                 const text = try parseTextBody(tracker, local_position);
                 tracker.nodes.push(types.Node{ .text = text });
             },
-            .container => {
+            .transform => {
                 tracker.advance();
-                const container = try parseContainer(tracker, local_position);
-                tracker.nodes.push(types.Node{ .container = container });
+                const transform = try parseTransform(tracker, local_position);
+                tracker.nodes.push(types.Node{ .transform = transform });
             },
             else => {
                 std.debug.print("unexpected token found in rect body parsing at line {d} column {d} offset {d} in rect body parsing: {t} {s}\n", .{ token.span.line, token.span.column, token.span.offset, token.tag, token.literal });
@@ -358,22 +354,25 @@ fn parseRectBody(tracker: *TokenTracker, local_position: Vector) Error!Rect {
     if (!closed) {
         return reporter.throwError("expected closing brace after rect declaration", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedRightBrace);
     }
-    if (!size_set) {
-        return reporter.throwError("expected size after rect keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
+    if (rect.size.x <= 0 or rect.size.y <= 0) {
+        return reporter.throwError("expected positive size in rect node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.InvalidSize);
     }
-    if (!position_set) {
-        return reporter.throwError("expected position after rect keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
+    if (rect.position == null) {
+        return reporter.throwError("expected position in rect node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
+    }
+    if (rect.background == null) {
+        return reporter.throwError("expected background in rect node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
     }
 
     return rect;
 }
 
-fn parseContainer(tracker: *TokenTracker, local_position: Vector) !types.Container {
+fn parseTransform(tracker: *TokenTracker, local_position: Vector) !types.Transform {
     if (!consumeTag(tracker, .lbrace)) {
-        return reporter.throwError("expected opening brace after container keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedLeftBrace);
+        return reporter.throwError("expected opening brace after transform keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedLeftBrace);
     }
 
-    var container = types.Container{
+    var transform = types.Transform{
         .id = null,
         .position = null,
         .local_position = local_position,
@@ -391,48 +390,56 @@ fn parseContainer(tracker: *TokenTracker, local_position: Vector) !types.Contain
             },
             .id => {
                 tracker.advance();
-                if (container.id != null) {
-                    return reporter.throwError("expected only one id after container keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.DuplicateProperty);
+                if (transform.id) |_| {
+                    if (tracker.peek().tag == .string) {
+                        transform.id = tracker.peek().literal;
+                        tracker.advance();
+                    } else {
+                        return reporter.throwError("expected id value after id keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedIdentifier);
+                    }
                 }
-                if (tracker.peek().tag != .string) {
-                    return reporter.throwError("expected id value after id keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedIdentifier);
-                }
-                container.id = tracker.peek().literal;
-                tracker.advance();
             },
             .position => {
                 tracker.advance();
-                container.position = try parseVector(tracker, "position");
+                transform.position = try parseVector(tracker, "position");
             },
             .nodes => {
                 tracker.advance();
-                const container_position = container.position orelse {
-                    return reporter.throwError("expected position before nodes in container", token.span.line, token.span.column, token.span.offset, Error.MissingProperty);
+                const transform_position = transform.position orelse {
+                    return reporter.throwError("expected position before nodes in transform", token.span.line, token.span.column, token.span.offset, Error.MissingProperty);
                 };
                 const child_local_position = Vector{
-                    .x = local_position.x + container_position.x,
-                    .y = local_position.y + container_position.y,
+                    .x = local_position.x + transform_position.x,
+                    .y = local_position.y + transform_position.y,
                 };
                 const nodes_slice = try parseNodeArray(tracker, child_local_position);
-                container.children = nodes_slice;
+                transform.children = nodes_slice;
             },
             else => {
-                std.debug.print("unexpected token found at line {d} column {d} offset {d} in container parsing: {t} {s}\n", .{ token.span.line, token.span.column, token.span.offset, token.tag, token.literal });
+                std.debug.print("unexpected token found at line {d} column {d} offset {d} in transform parsing: {t} {s}\n", .{ token.span.line, token.span.column, token.span.offset, token.tag, token.literal });
                 tracker.advance();
             },
+        }
+
+        if (transform.position == null) {
+            return reporter.throwError("expected position in transform node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
         }
     }
 
     if (!closed) {
-        return reporter.throwError("expected closing brace after container declaration", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedRightBrace);
+        return reporter.throwError("expected closing brace after transform declaration", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedRightBrace);
     }
 
-    if (container.position == null) {
-        return reporter.throwError("expected position in container node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
+    if (transform.position) |position| {
+        if (position.x <= 0 or position.y <= 0) {
+            return reporter.throwError("expected positive position in transform node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.InvalidPosition);
+        }
+    } else {
+        return reporter.throwError("expected position in transform node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
     }
 
-    container.local_position = local_position;
-    return container;
+    transform.local_position = local_position;
+    return transform;
 }
 
 fn parseTextBody(tracker: *TokenTracker, local_position: Vector) !types.Text {
@@ -489,14 +496,19 @@ fn parseTextBody(tracker: *TokenTracker, local_position: Vector) !types.Text {
         return reporter.throwError("expected closing brace after text declaration", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedRightBrace);
     }
 
-    if (text.position == null) {
+    if (text.position) |position| {
+        if (position.x <= 0 or position.y <= 0) {
+            return reporter.throwError("expected positive position in text node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.InvalidPosition);
+        }
+    } else {
         return reporter.throwError("expected position in text node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
     }
-    if (text.text_size == null) {
-        return reporter.throwError("expected text size in text node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedNumber);
-    }
-    if (text.body.len == 0) {
-        return reporter.throwError("expected text after body keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedString);
+    if (text.text_size) |text_size| {
+        if (text_size <= 0) {
+            return reporter.throwError("expected positive text size in text node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.InvalidTextSize);
+        }
+    } else {
+        return reporter.throwError("expected text size in text node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
     }
     text.local_position = local_position;
     return text;

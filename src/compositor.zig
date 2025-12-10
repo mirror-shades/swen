@@ -57,7 +57,8 @@ fn buildScene(desktop: types.Desktop, rect_buffer: *memory.RectArray, size: Vect
         idx -= 1;
         const rect = rect_buffer.getItem(idx);
         if (rect.background) |background| {
-            try fillCanvasRect(canvas, background, rectToPfRect(rect));
+            const pf_rect = try rectToPfRect(rect);
+            try fillCanvasRect(canvas, background, pf_rect);
         }
     }
 
@@ -240,23 +241,26 @@ fn setCanvasFillColor(canvas: c.PFCanvasRef, color: Color) !void {
     c.PFCanvasSetFillStyle(canvas, fill_style);
 }
 
-fn rectToPfRect(rect: Rect) c.PFRectF {
-    const world_x = rect.local_position.x + rect.position.x;
-    const world_y = rect.local_position.y + rect.position.y;
+fn rectToPfRect(rect: Rect) !c.PFRectF {
+    if (rect.position) |position| {
+        const world_x = rect.local_position.x + position.x;
+        const world_y = rect.local_position.y + position.y;
 
-    const origin = c.PFVector2F{
-        .x = @floatFromInt(world_x),
-        .y = @floatFromInt(world_y),
-    };
-    const lower_right = c.PFVector2F{
-        .x = @floatFromInt(world_x + rect.size.x),
-        .y = @floatFromInt(world_y + rect.size.y),
-    };
+        const origin = c.PFVector2F{
+            .x = @floatFromInt(world_x),
+            .y = @floatFromInt(world_y),
+        };
+        const lower_right = c.PFVector2F{
+            .x = @floatFromInt(world_x + rect.size.x),
+            .y = @floatFromInt(world_y + rect.size.y),
+        };
 
-    return .{
-        .origin = origin,
-        .lower_right = lower_right,
-    };
+        return .{
+            .origin = origin,
+            .lower_right = lower_right,
+        };
+    }
+    return reporter.throwRuntimeError("rect must have a position", Error.MissingProperty);
 }
 
 fn makeCanvasRect(size: Vector) c.PFRectF {
@@ -350,8 +354,8 @@ fn drawTextNodes(canvas: c.PFCanvasRef, nodes: []const types.Node) !void {
             .text => |text| {
                 try drawSingleText(canvas, text);
             },
-            .container => |container| {
-                if (container.children) |children| {
+            .transform => |transform| {
+                if (transform.children) |children| {
                     try drawTextNodes(canvas, children);
                 }
             },

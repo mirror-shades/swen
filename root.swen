@@ -18,7 +18,8 @@ root {
                 background (0, 200, 50, 255)
                 position (30, 30)
                 nodes [
-                    container {
+
+                    transform {
                         position (300, 300)
                         nodes [
                             rect {

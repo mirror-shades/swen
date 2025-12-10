@@ -44,13 +44,13 @@ pub const App = struct {
 pub const Rect = struct {
     id: ?[]const u8,
     size: Vector,
-    position: Vector,
+    position: ?Vector,
     local_position: Vector,
     background: ?Color,
     children: ?[]Node,
 };
 
-pub const Container = struct {
+pub const Transform = struct {
     id: ?[]const u8,
     position: ?Vector,
     local_position: Vector,
@@ -69,7 +69,7 @@ pub const Text = struct {
 pub const Node = union(enum) {
     rect: Rect,
     text: Text,
-    container: Container,
+    transform: Transform,
 };
 
 const Span = struct {
@@ -93,7 +93,6 @@ pub const TokenTag = enum {
     // node types
     rect,
     text,
-    container,
     wayland_surface,
     transform,
     clip,
@@ -153,8 +152,8 @@ fn get_tag(word: []const u8) !TokenTag {
             }
         },
         'c' => {
-            if (std.mem.eql(u8, word, "container")) {
-                tag = .container;
+            if (std.mem.eql(u8, word, "transform")) {
+                tag = .transform;
             } else if (std.mem.eql(u8, word, "clip")) {
                 tag = .clip;
             } else if (std.mem.eql(u8, word, "color")) {
