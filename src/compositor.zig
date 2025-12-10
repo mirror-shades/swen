@@ -2,6 +2,7 @@ const std = @import("std");
 const math = std.math;
 const types = @import("./types.zig");
 const Color = types.Color;
+const Vector = types.Vector;
 const Rect = types.Rect;
 const memory = @import("./memory.zig");
 
@@ -19,14 +20,14 @@ pub fn compose(root: types.Root, rect_buffer: *memory.RectArray) !void {
 
     prepareDesktopSceneData(root.desktop, rect_buffer);
 
-    const scene = try buildScene(root.desktop, rect_buffer, surface.size.x, surface.size.y);
-    try renderScene(scene, surface.size.x, surface.size.y, surface.background);
+    const scene = try buildScene(root.desktop, rect_buffer, surface.size);
+    try renderScene(scene, surface.size, surface.background);
 }
 
-fn buildScene(desktop: types.Desktop, rect_buffer: *memory.RectArray, width: usize, height: usize) !c.PFSceneRef {
+fn buildScene(desktop: types.Desktop, rect_buffer: *memory.RectArray, size: Vector) !c.PFSceneRef {
     const canvas_size = c.PFVector2F{
-        .x = @floatFromInt(width),
-        .y = @floatFromInt(height),
+        .x = @floatFromInt(size.x),
+        .y = @floatFromInt(size.y),
     };
 
     const font_context = c.PFCanvasFontContextCreateWithSystemSource();
@@ -43,7 +44,7 @@ fn buildScene(desktop: types.Desktop, rect_buffer: *memory.RectArray, width: usi
     defer if (canvas_owned) c.PFCanvasDestroy(canvas);
 
     const desktop_color = desktop.surface_rect.background orelse defaultBackgroundColor();
-    try fillCanvasRect(canvas, desktop_color, makeCanvasRect(width, height));
+    try fillCanvasRect(canvas, desktop_color, makeCanvasRect(size));
 
     var idx: usize = rect_buffer.getLength();
     while (idx > 0) {
@@ -65,8 +66,7 @@ fn buildScene(desktop: types.Desktop, rect_buffer: *memory.RectArray, width: usi
 
 fn renderScene(
     scene: c.PFSceneRef,
-    width: usize,
-    height: usize,
+    size: Vector,
     desktop_background: ?Color,
 ) !void {
     if (c.SDL_Init(c.SDL_INIT_VIDEO) != 0) {
@@ -82,8 +82,8 @@ fn renderScene(
     );
     try setGlAttribute(c.SDL_GL_DOUBLEBUFFER, 1);
 
-    const win_width = try toI32(width);
-    const win_height = try toI32(height);
+    const win_width = size.x;
+    const win_height = size.y;
 
     const window = c.SDL_CreateWindow(
         "swen compositor",
@@ -190,7 +190,22 @@ fn prepareDesktopSceneData(
         for (nodes) |node| {
             switch (node) {
                 .rect => |rect| {
-                    rect_buffer.push(rect);
+                    pushRectWithChildren(rect, rect_buffer);
+                },
+                else => {},
+            }
+        }
+    }
+}
+
+fn pushRectWithChildren(rect: types.Rect, rect_buffer: *memory.RectArray) void {
+    rect_buffer.push(rect);
+
+    if (rect.children) |children| {
+        for (children) |child_node| {
+            switch (child_node) {
+                .rect => |child_rect| {
+                    pushRectWithChildren(child_rect, rect_buffer);
                 },
                 else => {},
             }
@@ -213,13 +228,16 @@ fn fillCanvasRect(canvas: c.PFCanvasRef, color: Color, pf_rect: c.PFRectF) !void
 }
 
 fn rectToPfRect(rect: Rect) c.PFRectF {
+    const world_x = rect.local_position.x + rect.position.x;
+    const world_y = rect.local_position.y + rect.position.y;
+
     const origin = c.PFVector2F{
-        .x = @floatFromInt(rect.position.x),
-        .y = @floatFromInt(rect.position.y),
+        .x = @floatFromInt(world_x),
+        .y = @floatFromInt(world_y),
     };
     const lower_right = c.PFVector2F{
-        .x = @floatFromInt(rect.position.x + rect.size.x),
-        .y = @floatFromInt(rect.position.y + rect.size.y),
+        .x = @floatFromInt(world_x + rect.size.x),
+        .y = @floatFromInt(world_y + rect.size.y),
     };
 
     return .{
@@ -228,11 +246,11 @@ fn rectToPfRect(rect: Rect) c.PFRectF {
     };
 }
 
-fn makeCanvasRect(width: usize, height: usize) c.PFRectF {
+fn makeCanvasRect(size: Vector) c.PFRectF {
     const origin = c.PFVector2F{ .x = 0, .y = 0 };
     const lower_right = c.PFVector2F{
-        .x = @floatFromInt(width),
-        .y = @floatFromInt(height),
+        .x = @floatFromInt(size.x),
+        .y = @floatFromInt(size.y),
     };
 
     return .{

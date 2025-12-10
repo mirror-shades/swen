@@ -20,6 +20,22 @@ pub fn lex(source: []const u8, tokens: *memory.TokenArray) !void {
         } else {
             current_column += 1;
         }
+        if (char == '-') {
+            if (helpers.isNumber(source[index + 1])) {
+                const end_index = try makeNumber(source, index, current_line, current_column, current_offset);
+                const new_token = types.makeToken(source[index..end_index], current_line, current_column, current_offset);
+                tokens.push(new_token);
+                index = end_index;
+                current_offset = end_index;
+                continue;
+            } else {
+                const new_token = types.makeToken(source[index .. index + 1], current_line, current_column, current_offset);
+                tokens.push(new_token);
+                index += 1;
+                current_offset = index;
+                continue;
+            }
+        }
         if (helpers.isNumber(char)) {
             const end_index = try makeNumber(source, index, current_line, current_column, current_offset);
             const new_token = types.makeToken(source[index..end_index], current_line, current_column, current_offset);
@@ -68,6 +84,8 @@ fn makeNumber(source: []const u8, index: usize, line: usize, column: usize, offs
         } else if (helpers.isBreakChar(source[tracker])) {
             break;
         } else if (helpers.isNumber(source[tracker])) {
+            tracker += 1;
+        } else if (source[tracker] == '-') {
             tracker += 1;
         } else {
             std.debug.print("error: invalid number at line {d} column {d} offset {d}\n", .{ line, column, offset });

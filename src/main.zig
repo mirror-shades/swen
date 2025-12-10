@@ -14,6 +14,9 @@ pub fn main() !void {
     std.debug.print("source file: \n\n{s}\n", .{source});
 
     try lexer.lex(source, &token_array);
+    for (token_array.getArray()) |token| {
+        std.debug.print("token: {t} {s}\n", .{ token.tag, token.literal });
+    }
 
     var node_array = memory.NodeArray.init();
     var root = try parser.parse(&token_array, &node_array);

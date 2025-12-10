@@ -2,7 +2,7 @@ const std = @import("std");
 
 const helpers = @import("./helpers.zig");
 
-pub const Vector = struct { x: usize, y: usize };
+pub const Vector = struct { x: i32, y: i32 };
 pub const Color = struct { r: u8, g: u8, b: u8, a: u8 };
 
 pub const Root = struct {
@@ -50,6 +50,7 @@ pub const Rect = struct {
     id: ?[]const u8,
     size: Vector,
     position: Vector,
+    local_position: Vector,
     background: ?Color,
     children: ?[]Node,
 };
@@ -237,6 +238,29 @@ fn get_tag(word: []const u8) !TokenTag {
 }
 
 pub fn makeToken(literal: []const u8, line: usize, column: usize, offset: usize) Token {
+    if (literal[0] == '-') {
+        if (helpers.isNumber(literal[1])) {
+            return Token{
+                .literal = literal,
+                .tag = .number,
+                .span = Span{
+                    .line = line,
+                    .column = column,
+                    .offset = offset,
+                },
+            };
+        } else {
+            return Token{
+                .literal = literal,
+                .tag = .identifier,
+                .span = Span{
+                    .line = line,
+                    .column = column,
+                    .offset = offset,
+                },
+            };
+        }
+    }
     if (helpers.isSymbol(literal[0])) {
         return Token{
             .literal = literal,

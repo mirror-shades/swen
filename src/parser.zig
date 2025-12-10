@@ -3,6 +3,7 @@ const memory = @import("./memory.zig");
 const types = @import("./types.zig");
 const Token = types.Token;
 const TokenTag = types.TokenTag;
+const Vector = types.Vector;
 
 const TokenTracker = struct {
     tokens: *memory.TokenArray,
@@ -94,11 +95,11 @@ fn parseDesktop(
         switch (token.tag) {
             .surface_rect => {
                 tracker.advance();
-                desktop.surface_rect = try parseRectBody(tracker);
+                desktop.surface_rect = try parseRectBody(tracker, Vector{ .x = 0, .y = 0 });
             },
             .nodes => {
                 tracker.advance();
-                const nodes_slice = try parseNodeArray(tracker);
+                const nodes_slice = try parseNodeArray(tracker, Vector{ .x = 0, .y = 0 });
                 desktop.nodes = nodes_slice;
             },
             .workspaces => {
@@ -154,7 +155,7 @@ fn parseSystem(tracker: *TokenTracker) !types.System {
     return initSystem();
 }
 
-fn parseNodeArray(tracker: *TokenTracker) ![]types.Node {
+fn parseNodeArray(tracker: *TokenTracker, local_position: Vector) ![]types.Node {
     if (!consumeTag(tracker, .lbracket)) {
         declarationError("desktop", tracker.peek(), "expected opening bracket after nodes keyword", .{});
         return error.InvalidDesktopDeclaration;
@@ -166,7 +167,7 @@ fn parseNodeArray(tracker: *TokenTracker) ![]types.Node {
         switch (token.tag) {
             .rect => {
                 tracker.advance();
-                const rect = try parseRectBody(tracker);
+                const rect = try parseRectBody(tracker, local_position);
                 tracker.nodes.push(types.Node{ .rect = rect });
             },
             .rbracket => {
@@ -221,13 +222,14 @@ fn parseWorkspaceArray(
     return &[_]types.Workspace{};
 }
 
-fn parseRectBody(tracker: *TokenTracker) error{ InvalidRectDeclaration, InvalidDesktopDeclaration }!types.Rect {
+fn parseRectBody(tracker: *TokenTracker, local_position: Vector) error{ InvalidRectDeclaration, InvalidDesktopDeclaration }!types.Rect {
     if (!consumeTag(tracker, .lbrace)) {
         declarationError("rect", tracker.peek(), "expected opening brace after rect keyword", .{});
         return error.InvalidRectDeclaration;
     }
 
     var rect = initRect();
+    rect.local_position = local_position;
     var size_set = false;
     var position_set = false;
     var closed = false;
@@ -284,7 +286,11 @@ fn parseRectBody(tracker: *TokenTracker) error{ InvalidRectDeclaration, InvalidD
             },
             .nodes => {
                 tracker.advance();
-                const nodes_slice = try parseNodeArray(tracker);
+                const child_local_position = Vector{
+                    .x = local_position.x + rect.position.x,
+                    .y = local_position.y + rect.position.y,
+                };
+                const nodes_slice = try parseNodeArray(tracker, child_local_position);
                 rect.children = nodes_slice;
             },
             else => {
@@ -317,7 +323,7 @@ fn parseVector(tracker: *TokenTracker, field: []const u8) !types.Vector {
 
     var x_buf: [32]u8 = undefined;
     const x_label = std.fmt.bufPrint(&x_buf, "{s} x", .{field}) catch field;
-    const x = try consumeNumber(usize, tracker, x_label);
+    const x = try consumeNumber(i32, tracker, x_label);
 
     if (!consumeTag(tracker, .comma)) {
         declarationError("rect", tracker.peek(), "expected comma after {s} x", .{field});
@@ -326,7 +332,7 @@ fn parseVector(tracker: *TokenTracker, field: []const u8) !types.Vector {
 
     var y_buf: [32]u8 = undefined;
     const y_label = std.fmt.bufPrint(&y_buf, "{s} y", .{field}) catch field;
-    const y = try consumeNumber(usize, tracker, y_label);
+    const y = try consumeNumber(i32, tracker, y_label);
 
     if (!consumeTag(tracker, .rparen)) {
         declarationError("rect", tracker.peek(), "expected closing parenthesis after {s} keyword", .{field});
@@ -438,6 +444,7 @@ fn initRect() types.Rect {
     return types.Rect{
         .id = null,
         .size = types.Vector{ .x = 0, .y = 0 },
+        .local_position = types.Vector{ .x = 0, .y = 0 },
         .position = types.Vector{ .x = 0, .y = 0 },
         .background = null,
         .children = null,

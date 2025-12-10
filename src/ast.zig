@@ -1,6 +1,8 @@
 const std = @import("std");
 const helpers = @import("./helpers.zig");
 const types = @import("./types.zig");
+const iVector = types.iVector;
+const uVector = types.uVector;
 const memory = @import("./memory.zig");
 
 pub fn printAST(root: *types.Root) void {
