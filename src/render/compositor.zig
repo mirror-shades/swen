@@ -174,14 +174,14 @@ pub fn buildSceneFromRoot(
     root: types.Root,
     rect_buffer: *memory.FixedArray(Rect, 4096),
 ) !c.PFSceneRef {
-    const surface = root.desktop.surface_rect;
-    if (surface.size.x <= 0 or surface.size.y <= 0) {
-        return reporter.throwRuntimeError("desktop surface must have a positive size", Error.InvalidSurfaceSize);
+    const size = root.desktop.size;
+    if (size.x <= 0 or size.y <= 0) {
+        return reporter.throwRuntimeError("desktop must have a positive size", Error.InvalidSurfaceSize);
     }
 
     rect_buffer.length = 0;
     prepareDesktopSceneData(root.desktop, rect_buffer);
-    return buildScene(root.desktop, rect_buffer, surface.size);
+    return buildScene(root.desktop, rect_buffer, size);
 }
 
 fn buildScene(desktop: types.Desktop, rect_buffer: *memory.FixedArray(Rect, 4096), size: Vector) !c.PFSceneRef {
@@ -204,12 +204,8 @@ fn buildScene(desktop: types.Desktop, rect_buffer: *memory.FixedArray(Rect, 4096
     defer if (canvas_owned) c.PFCanvasDestroy(canvas);
     try initializeCanvasTextState(canvas);
 
-    const desktop_color = desktop.surface_rect.background orelse defaultBackgroundColor();
-    try fillCanvasRect(canvas, desktop_color, makeCanvasRect(size));
-
-    var idx: usize = rect_buffer.getLength();
-    while (idx > 0) {
-        idx -= 1;
+    // Draw all rect nodes in order (first node = bottom layer, last = top)
+    for (0..rect_buffer.getLength()) |idx| {
         const rect = rect_buffer.getItem(idx);
         if (rect.background) |background| {
             const pf_rect = try rectToPfRect(rect);

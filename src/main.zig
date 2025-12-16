@@ -26,8 +26,8 @@ pub fn main() !void {
 
     var rect_array = memory.RectArray.init();
     var ctx = try compositor.Compositor.init(
-        root.desktop.surface_rect.size,
-        root.desktop.surface_rect.background,
+        root.desktop.size,
+        null, // background is now a node
     );
     defer ctx.deinit();
 
@@ -39,7 +39,6 @@ pub fn main() !void {
     while (ctx.running) {
         ctx.pumpEvents();
 
-        // TODO: drain patch queue + apply patches to `root`, then set `dirty = true`.
         if (dirty) {
             const new_scene = try compositor.buildSceneFromRoot(root, &rect_array);
             try ctx.setScene(new_scene);

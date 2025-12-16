@@ -1,17 +1,14 @@
 root {
     system {}
     desktop {
-        surface_rect {
-            size (1024, 720)
-            background (50, 0, 50, 255)
-            position (0, 0)
-        }
+        size (1024, 720)
 
         nodes [
             rect {
-                size (150, 200)
-                background (15, 20, 150, 100)
-                position (100, 150)
+                id background
+                size (1024, 720)
+                background (50, 0, 50, 255)
+                position (0, 0)
             }
             rect {
                 size (600, 200,)
@@ -37,6 +34,11 @@ root {
                         ]
                     }
                 ]
+            }
+            rect {
+                size (150, 200)
+                background (15, 20, 150, 100)
+                position (100, 150)
             }
         ]
 

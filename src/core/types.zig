@@ -12,7 +12,7 @@ pub const Root = struct {
 };
 
 pub const Desktop = struct {
-    surface_rect: Rect,
+    size: Vector,
     active_workspace: ?Workspace,
     nodes: ?[]Node,
     workspaces: ?[]Workspace,
@@ -100,7 +100,6 @@ pub const TokenTag = enum {
     text_size,
     position,
     background,
-    surface_rect,
     body,
     color,
 
@@ -193,8 +192,6 @@ fn get_tag(word: []const u8) !TokenTag {
                 tag = .system;
             } else if (std.mem.eql(u8, word, "size")) {
                 tag = .size;
-            } else if (std.mem.eql(u8, word, "surface_rect")) {
-                tag = .surface_rect;
             }
         },
         'w' => {
@@ -291,26 +288,3 @@ pub fn makeNumberToken(line: usize, column: usize, offset: usize, potential_numb
     const new_token = makeToken(potential_number, line, column, offset);
     return new_token;
 }
-
-pub const Instruction = union(enum) {
-    draw_rect: struct {
-        position: Vector,
-        size: Vector,
-        color: Color,
-    },
-    draw_text: struct {
-        position: Vector,
-        text: []const u8,
-        color: Color,
-        text_size: u16,
-    },
-    set_transform: struct {
-        matrix: Matrix,
-    },
-    set_clip: struct {
-        position: Vector,
-        size: Vector,
-    },
-    push_state,
-    pop_state,
-};

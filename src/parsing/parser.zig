@@ -99,9 +99,9 @@ fn parseDesktop(
     while (tracker.peek().tag != .eof) {
         const token = tracker.peek();
         switch (token.tag) {
-            .surface_rect => {
+            .size => {
                 tracker.advance();
-                desktop.surface_rect = try parseRectBody(tracker, Vector{ .x = 0, .y = 0 });
+                desktop.size = try parseVector(tracker, "size");
             },
             .nodes => {
                 tracker.advance();
@@ -127,6 +127,10 @@ fn parseDesktop(
 
     if (!closed) {
         return reporter.throwError("expected closing brace after desktop declaration", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedRightBrace);
+    }
+
+    if (desktop.size.x <= 0 or desktop.size.y <= 0) {
+        return reporter.throwError("desktop must have a positive size", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.InvalidSize);
     }
 
     return desktop;
@@ -255,14 +259,9 @@ fn parseRectBody(tracker: *TokenTracker, local_position: Vector) Error!Rect {
             },
             .id => {
                 tracker.advance();
-                if (rect.id) |_| {
-                    if (tracker.peek().tag != .string) {
-                        rect.id = tracker.peek().literal;
-                        tracker.advance();
-                    } else if (tracker.peek().tag == .string) {
-                        return reporter.throwError("expected id value after id keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedIdentifier);
-                    }
-                }
+                // Accept any token literal as an id value (identifier, keyword, string, etc.)
+                rect.id = tracker.peek().literal;
+                tracker.advance();
             },
             .size => {
                 tracker.advance();
@@ -393,14 +392,9 @@ fn parseTransform(tracker: *TokenTracker, local_position: Vector) !types.Transfo
             },
             .id => {
                 tracker.advance();
-                if (transform.id) |_| {
-                    if (tracker.peek().tag == .string) {
-                        transform.id = tracker.peek().literal;
-                        tracker.advance();
-                    } else {
-                        return reporter.throwError("expected id value after id keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedIdentifier);
-                    }
-                }
+                // Accept any token literal as an id value
+                transform.id = tracker.peek().literal;
+                tracker.advance();
             },
             .position => {
                 tracker.advance();
@@ -669,7 +663,7 @@ fn consumeTag(tracker: *TokenTracker, tag: TokenTag) bool {
 fn initDesktop() types.Desktop {
     return types.Desktop{
         .active_workspace = null,
-        .surface_rect = initRect(),
+        .size = types.Vector{ .x = 0, .y = 0 },
         .nodes = null,
         .workspaces = null,
     };
