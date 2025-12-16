@@ -13,7 +13,7 @@ The backend takes a hybrid approach: **the CPU does scheduling/allocation**, and
 
 ## Architecture
 
-The compositor reads a form of markup written as a .swen file. This is parsed into an AST and made into a global scene tree much like Flutter. When an app is launched which provides a .swen file, it is parsed and inserted into the scene tree. The apps UI is sandboxed from writing to other apps, and is limited to receiving events which are explicitly requested within its scene tree. A low level IR is provided so apps can easily push changes, to the scene tree, including transformations.
+The compositor reads a form of markup written as a .swen file. This is parsed into an AST and made into a global scene tree much like Flutter. When an app is launched which provides a .swen file, it is parsed and inserted into the scene tree. The apps UI is sandboxed from writing to other apps, and is limited to receiving events which are explicitly requested within its scene tree. Apps communicate changes to the scene tree via **patch ops** (high-level operations like `SetText`, `SetPosition`, etc.), which are distinct from the compositor's internal **render IR** (low-level rendering instructions used for tile-based GPU rendering).
 
 ## Pipeline (end-to-end)
 
@@ -30,16 +30,16 @@ The compositor reads a form of markup written as a .swen file. This is parsed in
 - The scene becomes **dirty** → update IR for affected nodes and re-schedule only the impacted **dirty tiles**, then swap the current frame snapshot.
 - (Bootstrap fallback) if using Pathfinder directly, dirtiness may temporarily trigger a coarse rebuild of a `PFScene`/proxy until incremental tile scheduling fully replaces that path.
 
-### 3) Events → app → patches (reactive updates)
+### 3) Events → app → patch ops (reactive updates)
 - Input is hit-tested/routed to a target node `id` and its owning app.
 - The compositor forwards the event to the app (IPC).
-- The app updates its state and emits **patch ops** (not draw calls), e.g.:
+- The app updates its state and emits **patch ops** (high-level scene tree mutations, not draw calls), e.g.:
   - set properties: `SetText`, `SetBackground`, `SetPosition`, `SetSize`, `SetTransform`
   - edit structure: `InsertChild`, `RemoveNode`, `ReplaceChildren`
-- The compositor applies ops to the retained subtree (with validation/sandboxing), marks dirty, then updates IR + re-schedules only the impacted **dirty tiles** (with a Pathfinder rebuild as an optional bootstrap fallback).
+- The compositor applies patch ops to the retained subtree (with validation/sandboxing), marks dirty, then lowers the updated scene tree into **render IR** and re-schedules only the impacted **dirty tiles** (with a Pathfinder rebuild as an optional bootstrap fallback).
 
-### 4) Internal IR (compositor-internal)
-The compositor lowers the retained scene into a render-command IR (e.g. `Instruction[]`) that is designed for **incremental, tile-based rendering**:
+### 4) Render IR (compositor-internal)
+The compositor lowers the retained scene tree (updated via patch ops) into a **render IR** (render-command IR, e.g. `Instruction[]`). This IR is distinct from patch ops: patch ops are app-facing high-level operations that modify the scene tree, while render IR is a compositor-internal low-level representation designed for **incremental, tile-based rendering**:
 - **Binning**: flatten geometry as needed, assign work to tiles (fixed tile size).
 - **Sorting/merging**: sort tile records so each tile is a contiguous slice; merge per-tile work.
 - **Classification**: skip empty tiles; fast-path solid tiles; compute coverage only for edge tiles.
