@@ -17,16 +17,171 @@ const c = @cImport({
     @cInclude("pathfinder.h");
 });
 
-pub fn compose(root: types.Root, rect_buffer: *memory.FixedArray(Rect, 4096)) !void {
+pub const Compositor = struct {
+    window: *c.SDL_Window,
+    gl_context: c.SDL_GLContext,
+    renderer: c.PFGLRendererRef,
+    resources: c.PFResourceLoaderRef,
+    build_options: c.PFBuildOptionsRef,
+    scene_proxy: ?c.PFSceneProxyRef = null,
+    running: bool = true,
+
+    pub fn init(size: Vector, desktop_background: ?Color) !Compositor {
+        if (c.SDL_Init(c.SDL_INIT_VIDEO) != 0) {
+            return reporter.throwRuntimeError("SDL initialization failed", Error.SDLInitFailed);
+        }
+
+        errdefer c.SDL_Quit();
+
+        try setGlAttribute(c.SDL_GL_CONTEXT_MAJOR_VERSION, 4);
+        try setGlAttribute(c.SDL_GL_CONTEXT_MINOR_VERSION, 3);
+        try setGlAttribute(
+            c.SDL_GL_CONTEXT_PROFILE_MASK,
+            @as(i32, @intCast(c.SDL_GL_CONTEXT_PROFILE_CORE)),
+        );
+        try setGlAttribute(c.SDL_GL_DOUBLEBUFFER, 1);
+
+        const window = c.SDL_CreateWindow(
+            "swen compositor",
+            c.SDL_WINDOWPOS_CENTERED,
+            c.SDL_WINDOWPOS_CENTERED,
+            size.x,
+            size.y,
+            c.SDL_WINDOW_OPENGL | c.SDL_WINDOW_SHOWN,
+        ) orelse {
+            return reporter.throwRuntimeError("failed to create SDL window", Error.WindowCreateFailed);
+        };
+        errdefer c.SDL_DestroyWindow(window);
+
+        const gl_context = c.SDL_GL_CreateContext(window) orelse {
+            return reporter.throwRuntimeError("failed to create OpenGL context", Error.GLContextCreateFailed);
+        };
+        errdefer c.SDL_GL_DeleteContext(gl_context);
+
+        if (c.SDL_GL_MakeCurrent(window, gl_context) != 0) {
+            return reporter.throwRuntimeError("failed to activate OpenGL context", Error.GLContextMakeCurrentFailed);
+        }
+
+        _ = c.SDL_GL_SetSwapInterval(1);
+        c.PFGLLoadWith(glFunctionLoader, null);
+
+        const window_size = c.PFVector2I{
+            .x = size.x,
+            .y = size.y,
+        };
+
+        const dest_framebuffer = c.PFGLDestFramebufferCreateFullWindow(&window_size);
+        if (dest_framebuffer == null) {
+            return reporter.throwRuntimeError("failed to create destination framebuffer", Error.GLDestFramebufferCreateFailed);
+        }
+        var dest_owned = true;
+        defer if (dest_owned) c.PFGLDestFramebufferDestroy(dest_framebuffer);
+
+        const gl_device = c.PFGLDeviceCreate(c.PF_GL_VERSION_GL4, 0);
+        if (gl_device == null) {
+            return reporter.throwRuntimeError("failed to create OpenGL device", Error.GLDeviceCreateFailed);
+        }
+        var device_owned = true;
+        defer if (device_owned) c.PFGLDeviceDestroy(gl_device);
+
+        const resources = c.PFEmbeddedResourceLoaderCreate();
+        if (resources == null) {
+            return reporter.throwRuntimeError("failed to create embedded resource loader", Error.ResourceLoaderCreateFailed);
+        }
+        errdefer c.PFResourceLoaderDestroy(resources);
+
+        var renderer_mode = c.PFRendererMode{ .level = c.PF_RENDERER_LEVEL_D3D11 };
+        var renderer_options = makeRendererOptions(dest_framebuffer, desktop_background);
+
+        const renderer = c.PFGLRendererCreate(gl_device, resources, &renderer_mode, &renderer_options);
+        if (renderer == null) {
+            return reporter.throwRuntimeError("failed to create renderer", Error.RendererCreateFailed);
+        }
+        // renderer takes ownership of gl_device + dest_framebuffer on success.
+        dest_owned = false;
+        device_owned = false;
+
+        errdefer c.PFGLRendererDestroy(renderer);
+
+        const build_options = c.PFBuildOptionsCreate();
+        if (build_options == null) {
+            return reporter.throwRuntimeError("failed to create build options", Error.BuildOptionsCreateFailed);
+        }
+        errdefer c.PFBuildOptionsDestroy(build_options);
+
+        return .{
+            .window = window,
+            .gl_context = gl_context,
+            .renderer = renderer,
+            .resources = resources,
+            .build_options = build_options,
+        };
+    }
+
+    pub fn deinit(self: *Compositor) void {
+        if (self.scene_proxy) |proxy| {
+            c.PFSceneProxyDestroy(proxy);
+            self.scene_proxy = null;
+        }
+        c.PFBuildOptionsDestroy(self.build_options);
+        c.PFGLRendererDestroy(self.renderer);
+        c.PFResourceLoaderDestroy(self.resources);
+
+        c.SDL_GL_DeleteContext(self.gl_context);
+        c.SDL_DestroyWindow(self.window);
+        c.SDL_Quit();
+    }
+
+    pub fn setScene(self: *Compositor, scene: c.PFSceneRef) !void {
+        if (self.scene_proxy) |proxy| {
+            c.PFSceneProxyDestroy(proxy);
+            self.scene_proxy = null;
+        }
+
+        const scene_proxy = c.PFSceneProxyCreateFromSceneAndRayonExecutor(
+            scene,
+            c.PF_RENDERER_LEVEL_D3D11,
+        );
+        if (scene_proxy == null) {
+            // If proxy creation fails, clean up the scene to avoid leaking.
+            c.PFSceneDestroy(scene);
+            return reporter.throwRuntimeError("failed to create scene proxy", Error.SceneProxyCreateFailed);
+        }
+
+        // Note: we intentionally do NOT destroy `scene` here; the existing codebase treats the proxy
+        // as the owner of the scene.
+        self.scene_proxy = scene_proxy;
+    }
+
+    pub fn pumpEvents(self: *Compositor) void {
+        var event: c.SDL_Event = undefined;
+        while (c.SDL_PollEvent(&event) != 0) {
+            if (event.type == c.SDL_QUIT) {
+                self.running = false;
+            }
+        }
+    }
+
+    pub fn renderFrame(self: *Compositor) void {
+        if (self.scene_proxy) |proxy| {
+            c.PFSceneProxyBuildAndRenderGL(proxy, self.renderer, self.build_options);
+            c.SDL_GL_SwapWindow(self.window);
+        }
+    }
+};
+
+pub fn buildSceneFromRoot(
+    root: types.Root,
+    rect_buffer: *memory.FixedArray(Rect, 4096),
+) !c.PFSceneRef {
     const surface = root.desktop.surface_rect;
     if (surface.size.x <= 0 or surface.size.y <= 0) {
         return reporter.throwRuntimeError("desktop surface must have a positive size", Error.InvalidSurfaceSize);
     }
 
+    rect_buffer.length = 0;
     prepareDesktopSceneData(root.desktop, rect_buffer);
-
-    const scene = try buildScene(root.desktop, rect_buffer, surface.size);
-    try renderScene(scene, surface.size, surface.background);
+    return buildScene(root.desktop, rect_buffer, surface.size);
 }
 
 fn buildScene(desktop: types.Desktop, rect_buffer: *memory.FixedArray(Rect, 4096), size: Vector) !c.PFSceneRef {
@@ -75,123 +230,8 @@ fn buildScene(desktop: types.Desktop, rect_buffer: *memory.FixedArray(Rect, 4096
     return scene;
 }
 
-fn renderScene(
-    scene: c.PFSceneRef,
-    size: Vector,
-    desktop_background: ?Color,
-) !void {
-    if (c.SDL_Init(c.SDL_INIT_VIDEO) != 0) {
-        return reporter.throwRuntimeError("SDL initialization failed", Error.SDLInitFailed);
-    }
-    defer c.SDL_Quit();
-
-    try setGlAttribute(c.SDL_GL_CONTEXT_MAJOR_VERSION, 4);
-    try setGlAttribute(c.SDL_GL_CONTEXT_MINOR_VERSION, 3);
-    try setGlAttribute(
-        c.SDL_GL_CONTEXT_PROFILE_MASK,
-        @as(i32, @intCast(c.SDL_GL_CONTEXT_PROFILE_CORE)),
-    );
-    try setGlAttribute(c.SDL_GL_DOUBLEBUFFER, 1);
-
-    const win_width = size.x;
-    const win_height = size.y;
-
-    const window = c.SDL_CreateWindow(
-        "swen compositor",
-        c.SDL_WINDOWPOS_CENTERED,
-        c.SDL_WINDOWPOS_CENTERED,
-        win_width,
-        win_height,
-        c.SDL_WINDOW_OPENGL | c.SDL_WINDOW_SHOWN,
-    );
-    if (window == null) {
-        return reporter.throwRuntimeError("failed to create SDL window", Error.WindowCreateFailed);
-    }
-    defer c.SDL_DestroyWindow(window);
-
-    const gl_context = c.SDL_GL_CreateContext(window);
-    if (gl_context == null) {
-        return reporter.throwRuntimeError("failed to create OpenGL context", Error.GLContextCreateFailed);
-    }
-    defer c.SDL_GL_DeleteContext(gl_context);
-
-    if (c.SDL_GL_MakeCurrent(window, gl_context) != 0) {
-        return reporter.throwRuntimeError("failed to activate OpenGL context", Error.GLContextMakeCurrentFailed);
-    }
-
-    _ = c.SDL_GL_SetSwapInterval(1);
-
-    c.PFGLLoadWith(glFunctionLoader, null);
-
-    var scene_owned = true;
-    defer if (scene_owned) c.PFSceneDestroy(scene);
-
-    const window_size = c.PFVector2I{
-        .x = win_width,
-        .y = win_height,
-    };
-
-    const dest_framebuffer = c.PFGLDestFramebufferCreateFullWindow(&window_size);
-    if (dest_framebuffer == null) {
-        return reporter.throwRuntimeError("failed to create destination framebuffer", Error.GLDestFramebufferCreateFailed);
-    }
-    var dest_owned = true;
-    defer if (dest_owned) c.PFGLDestFramebufferDestroy(dest_framebuffer);
-
-    const gl_device = c.PFGLDeviceCreate(c.PF_GL_VERSION_GL4, 0);
-    if (gl_device == null) {
-        return reporter.throwRuntimeError("failed to create OpenGL device", Error.GLDeviceCreateFailed);
-    }
-    var device_owned = true;
-    defer if (device_owned) c.PFGLDeviceDestroy(gl_device);
-
-    const resources = c.PFEmbeddedResourceLoaderCreate();
-    if (resources == null) {
-        return reporter.throwRuntimeError("failed to create embedded resource loader", Error.ResourceLoaderCreateFailed);
-    }
-    defer c.PFResourceLoaderDestroy(resources);
-
-    var renderer_mode = c.PFRendererMode{ .level = c.PF_RENDERER_LEVEL_D3D11 };
-    var renderer_options = makeRendererOptions(dest_framebuffer, desktop_background);
-
-    const renderer = c.PFGLRendererCreate(gl_device, resources, &renderer_mode, &renderer_options);
-    if (renderer == null) {
-        return reporter.throwRuntimeError("failed to create renderer", Error.RendererCreateFailed);
-    }
-    defer c.PFGLRendererDestroy(renderer);
-    dest_owned = false;
-    device_owned = false;
-
-    const build_options = c.PFBuildOptionsCreate();
-    if (build_options == null) {
-        return reporter.throwRuntimeError("failed to create build options", Error.BuildOptionsCreateFailed);
-    }
-    defer c.PFBuildOptionsDestroy(build_options);
-
-    const scene_proxy = c.PFSceneProxyCreateFromSceneAndRayonExecutor(
-        scene,
-        c.PF_RENDERER_LEVEL_D3D11,
-    );
-    if (scene_proxy == null) {
-        return reporter.throwRuntimeError("failed to create scene proxy", Error.SceneProxyCreateFailed);
-    }
-    defer c.PFSceneProxyDestroy(scene_proxy);
-    scene_owned = false;
-
-    var running = true;
-    while (running) {
-        var event: c.SDL_Event = undefined;
-        while (c.SDL_PollEvent(&event) != 0) {
-            if (event.type == c.SDL_QUIT) {
-                running = false;
-            }
-        }
-
-        c.PFSceneProxyBuildAndRenderGL(scene_proxy, renderer, build_options);
-        c.SDL_GL_SwapWindow(window);
-        c.SDL_Delay(16);
-    }
-}
+// NOTE: the old `renderScene()` (which owned an internal infinite loop) has been replaced by the
+// `Compositor` context API above. Rendering is now driven by the caller (e.g. `main.zig`).
 
 fn prepareDesktopSceneData(
     desktop: types.Desktop,

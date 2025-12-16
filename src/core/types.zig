@@ -292,16 +292,7 @@ pub fn makeNumberToken(line: usize, column: usize, offset: usize, potential_numb
     return new_token;
 }
 
-pub const InstructionTag = enum {
-    draw_rect,
-    draw_text,
-    apply_transform,
-    set_clip,
-    push_state,
-    pop_state,
-};
-
-pub const InstructionPayload = union(enum) {
+pub const Instruction = union(enum) {
     draw_rect: struct {
         position: Vector,
         size: Vector,
@@ -313,16 +304,13 @@ pub const InstructionPayload = union(enum) {
         color: Color,
         text_size: u16,
     },
-    apply_transform: Matrix,
+    set_transform: struct {
+        matrix: Matrix,
+    },
     set_clip: struct {
         position: Vector,
         size: Vector,
     },
-    push_state: void,
-    pop_state: void,
-};
-
-pub const Instruction = struct {
-    tag: InstructionTag,
-    payload: InstructionPayload,
+    push_state,
+    pop_state,
 };

@@ -2,14 +2,9 @@ const std = @import("std");
 const lexer = @import("./parsing/lexer.zig");
 const parser = @import("./parsing/parser.zig");
 const printer = @import("./utils/printer.zig");
-const codegen = @import("./codegen/codegen.zig");
 const compositor = @import("./render/compositor.zig");
 const memory = @import("./core/memory.zig");
 const types = @import("./core/types.zig");
-const Token = types.Token;
-const Node = types.Node;
-const Rect = types.Rect;
-const Instruction = types.Instruction;
 
 pub fn main() !void {
     const file = "./root.swen";
@@ -29,9 +24,29 @@ pub fn main() !void {
     var root = try parser.parse(&token_array, &node_array);
     printer.printAST(&root);
 
-    var ir_array = memory.IRArray.init();
-    try codegen.generate(&root, &ir_array);
-
     var rect_array = memory.RectArray.init();
-    try compositor.compose(root, &rect_array);
+    var ctx = try compositor.Compositor.init(
+        root.desktop.surface_rect.size,
+        root.desktop.surface_rect.background,
+    );
+    defer ctx.deinit();
+
+    // Initial scene.
+    const scene = try compositor.buildSceneFromRoot(root, &rect_array);
+    try ctx.setScene(scene);
+
+    var dirty = false;
+    while (ctx.running) {
+        ctx.pumpEvents();
+
+        // TODO: drain patch queue + apply patches to `root`, then set `dirty = true`.
+        if (dirty) {
+            const new_scene = try compositor.buildSceneFromRoot(root, &rect_array);
+            try ctx.setScene(new_scene);
+            dirty = false;
+        }
+
+        ctx.renderFrame();
+        std.Thread.sleep(16 * std.time.ns_per_ms);
+    }
 }
