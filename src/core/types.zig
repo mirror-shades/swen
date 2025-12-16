@@ -291,3 +291,38 @@ pub fn makeNumberToken(line: usize, column: usize, offset: usize, potential_numb
     const new_token = makeToken(potential_number, line, column, offset);
     return new_token;
 }
+
+pub const InstructionTag = enum {
+    draw_rect,
+    draw_text,
+    apply_transform,
+    set_clip,
+    push_state,
+    pop_state,
+};
+
+pub const InstructionPayload = union(enum) {
+    draw_rect: struct {
+        position: Vector,
+        size: Vector,
+        color: Color,
+    },
+    draw_text: struct {
+        position: Vector,
+        text: []const u8,
+        color: Color,
+        text_size: u16,
+    },
+    apply_transform: Matrix,
+    set_clip: struct {
+        position: Vector,
+        size: Vector,
+    },
+    push_state: void,
+    pop_state: void,
+};
+
+pub const Instruction = struct {
+    tag: InstructionTag,
+    payload: InstructionPayload,
+};

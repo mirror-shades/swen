@@ -5,6 +5,7 @@ const reporter = @import("../utils/reporter.zig");
 const Error = reporter.Error;
 const types = @import("../core/types.zig");
 const Token = types.Token;
+const Node = types.Node;
 const TokenTag = types.TokenTag;
 const Color = types.Color;
 const Vector = types.Vector;
@@ -12,11 +13,11 @@ const Text = types.Text;
 const Rect = types.Rect;
 
 const TokenTracker = struct {
-    tokens: *memory.TokenArray,
-    nodes: *memory.NodeArray,
+    tokens: *memory.FixedArray(Token, 4096),
+    nodes: *memory.FixedArray(Node, 4096),
     index: usize,
 
-    pub fn init(tokens: *memory.TokenArray, nodes: *memory.NodeArray) TokenTracker {
+    pub fn init(tokens: *memory.FixedArray(Token, 4096), nodes: *memory.FixedArray(Node, 4096)) TokenTracker {
         return TokenTracker{
             .tokens = tokens,
             .nodes = nodes,
@@ -37,7 +38,7 @@ const TokenTracker = struct {
     }
 };
 
-pub fn parse(token_array: *memory.TokenArray, nodes: *memory.NodeArray) Error!types.Root {
+pub fn parse(token_array: *memory.FixedArray(Token, 4096), nodes: *memory.FixedArray(Node, 4096)) Error!types.Root {
     if (token_array.getLength() == 0 or token_array.getItem(0).tag != .root) {
         return reporter.throwError("expected root keyword", token_array.getItem(0).span.line, token_array.getItem(0).span.column, token_array.getItem(0).span.offset, Error.ExpectedRootKeyword);
     }
@@ -206,7 +207,7 @@ fn parseNodeArray(tracker: *TokenTracker, local_position: Vector) Error![]types.
 }
 
 fn parseWorkspaceArray(
-    tokens: *memory.TokenArray,
+    tokens: *memory.FixedArray(Token, 4096),
     tracker: *TokenTracker,
     workspaces_token: Token,
 ) ![]types.Workspace {

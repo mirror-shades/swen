@@ -2,8 +2,15 @@ const std = @import("std");
 const lexer = @import("./parsing/lexer.zig");
 const parser = @import("./parsing/parser.zig");
 const printer = @import("./utils/printer.zig");
+const codegen = @import("./codegen/codegen.zig");
 const compositor = @import("./render/compositor.zig");
 const memory = @import("./core/memory.zig");
+const types = @import("./core/types.zig");
+const Token = types.Token;
+const Node = types.Node;
+const Rect = types.Rect;
+const Instruction = types.Instruction;
+
 pub fn main() !void {
     const file = "./root.swen";
     var source_buffer: [4096]u8 = undefined;
@@ -21,6 +28,9 @@ pub fn main() !void {
     var node_array = memory.NodeArray.init();
     var root = try parser.parse(&token_array, &node_array);
     printer.printAST(&root);
+
+    var ir_array = memory.IRArray.init();
+    try codegen.generate(&root, &ir_array);
 
     var rect_array = memory.RectArray.init();
     try compositor.compose(root, &rect_array);

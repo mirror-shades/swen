@@ -6,7 +6,7 @@ const helpers = @import("../utils/helpers.zig");
 const reporter = @import("../utils/reporter.zig");
 const Error = reporter.Error;
 
-pub fn lex(source: []const u8, tokens: *memory.TokenArray) !void {
+pub fn lex(source: []const u8, tokens: *memory.FixedArray(Token, 4096)) !void {
     var current_line: usize = 1;
     var current_column: usize = 1;
     var current_offset: usize = 0;

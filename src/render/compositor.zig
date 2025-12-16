@@ -17,7 +17,7 @@ const c = @cImport({
     @cInclude("pathfinder.h");
 });
 
-pub fn compose(root: types.Root, rect_buffer: *memory.RectArray) !void {
+pub fn compose(root: types.Root, rect_buffer: *memory.FixedArray(Rect, 4096)) !void {
     const surface = root.desktop.surface_rect;
     if (surface.size.x <= 0 or surface.size.y <= 0) {
         return reporter.throwRuntimeError("desktop surface must have a positive size", Error.InvalidSurfaceSize);
@@ -29,7 +29,7 @@ pub fn compose(root: types.Root, rect_buffer: *memory.RectArray) !void {
     try renderScene(scene, surface.size, surface.background);
 }
 
-fn buildScene(desktop: types.Desktop, rect_buffer: *memory.RectArray, size: Vector) !c.PFSceneRef {
+fn buildScene(desktop: types.Desktop, rect_buffer: *memory.FixedArray(Rect, 4096), size: Vector) !c.PFSceneRef {
     const canvas_size = c.PFVector2F{
         .x = @floatFromInt(size.x),
         .y = @floatFromInt(size.y),
@@ -195,7 +195,7 @@ fn renderScene(
 
 fn prepareDesktopSceneData(
     desktop: types.Desktop,
-    rect_buffer: *memory.RectArray,
+    rect_buffer: *memory.FixedArray(Rect, 4096),
 ) void {
     if (desktop.nodes) |nodes| {
         for (nodes) |node| {
@@ -209,7 +209,10 @@ fn prepareDesktopSceneData(
     }
 }
 
-fn pushRectWithChildren(rect: types.Rect, rect_buffer: *memory.RectArray) void {
+fn pushRectWithChildren(
+    rect: types.Rect,
+    rect_buffer: *memory.FixedArray(Rect, 4096),
+) void {
     rect_buffer.push(rect);
 
     if (rect.children) |children| {
