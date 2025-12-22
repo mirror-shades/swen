@@ -2,14 +2,12 @@ const std = @import("std");
 const sdl = @import("sdl");
 
 pub fn build(b: *std.Build) void {
-    const target = b.standardTargetOptions(.{
-        .default_target = .{
-            .cpu_arch = .x86_64,
-            .os_tag = .windows,
-            .abi = .msvc,
-        },
-    });
+    // Use host target by default, but allow override via command line
+    const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
+
+    const target_info = target.result;
+    const is_windows = target_info.os.tag == .windows;
 
     // Generate SDL2 config for the SDL.zig SDK so no external JSON
     // file needs to be maintained manually.
@@ -21,9 +19,13 @@ pub fn build(b: *std.Build) void {
         var file = cwd.createFile(sdl_config_path, .{ .truncate = true }) catch @panic("failed to create SDL config file");
         defer file.close();
 
-        // Hard‑wire your Scoop SDL2 paths here.
-        const json =
-            "{\"x86_64-windows-msvc\":{\"include\":\"C:/Users/User/scoop/apps/sdl2/current/include\",\"libs\":\"C:/Users/User/scoop/apps/sdl2/current/lib\",\"bin\":\"C:/Users/User/scoop/apps/sdl2/current/lib\"}}";
+        // Generate config based on target OS
+        const json = if (is_windows)
+            // Windows paths (Scoop SDL2)
+            "{\"x86_64-windows-msvc\":{\"include\":\"C:/Users/User/scoop/apps/sdl2/current/include\",\"libs\":\"C:/Users/User/scoop/apps/sdl2/current/lib\",\"bin\":\"C:/Users/User/scoop/apps/sdl2/current/lib\"}}"
+        else
+            // Linux paths (system SDL2)
+            "{\"x86_64-linux-gnu\":{\"include\":\"/usr/include/SDL2\",\"libs\":\"/usr/lib\",\"bin\":\"/usr/lib\"}}";
         file.writeAll(json) catch @panic("failed to write SDL config");
     }
 
@@ -46,11 +48,13 @@ pub fn build(b: *std.Build) void {
 
     exe.linkLibC();
 
-    // Ensure SDL2.dll is available next to the executable at runtime.
-    const sdl_dll: std.Build.LazyPath = .{
-        .cwd_relative = "C:/Users/User/scoop/apps/sdl2/current/lib/SDL2.dll",
-    };
-    _ = b.addInstallFileWithDir(sdl_dll, .bin, "SDL2.dll");
+    // Only copy DLL on Windows (Linux uses system libraries)
+    if (is_windows) {
+        const sdl_dll: std.Build.LazyPath = .{
+            .cwd_relative = "C:/Users/User/scoop/apps/sdl2/current/lib/SDL2.dll",
+        };
+        _ = b.addInstallFileWithDir(sdl_dll, .bin, "SDL2.dll");
+    }
 
     b.installArtifact(exe);
 
