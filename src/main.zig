@@ -3,6 +3,7 @@ const lexer = @import("./parsing/lexer.zig");
 const parser = @import("./parsing/parser.zig");
 const printer = @import("./utils/printer.zig");
 const compositor = @import("./render/compositor.zig");
+const codegen = @import("./codegen/codegen.zig");
 const memory = @import("./core/memory.zig");
 const types = @import("./core/types.zig");
 
@@ -27,7 +28,6 @@ pub fn main() !void {
     var root = try parser.parse(&token_array, &node_array);
     printer.printAST(&root);
 
-    var rect_array = memory.RectArray.init();
     var ir_array = memory.IRArray.init();
     var ctx = try compositor.Compositor.init(
         root.desktop.size,
@@ -35,9 +35,9 @@ pub fn main() !void {
     );
     defer ctx.deinit();
 
-    // Collect initial rectangles and lower to IR.
-    try compositor.collectRectsFromRoot(root, &rect_array);
-    compositor.lowerSceneToIR(root, &ir_array);
+    // Lower the parsed scene into IR via the dedicated codegen
+    // pipeline, which internally uses the richer render IR module.
+    try codegen.generate(&root, &ir_array);
 
     while (ctx.running) {
         ctx.pumpEvents();
