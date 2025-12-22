@@ -14,6 +14,12 @@ pub fn lex(source: []const u8, tokens: *memory.FixedArray(Token, 4096)) !void {
     var index: usize = 0;
     while (index < source.len) {
         const char = source[index];
+        // Ignore carriage returns so Windows-style CRLF line endings don't interfere
+        // with tokenization or number parsing.
+        if (char == '\r') {
+            index += 1;
+            continue;
+        }
         if (char == '\n') {
             current_line += 1;
             current_column = 1;

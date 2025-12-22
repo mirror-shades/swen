@@ -34,7 +34,11 @@ pub const App = struct {
     children: []Node,
 };
 
+/// Stable identifier for scene nodes. Used for caching, diffing, and patch targeting.
+pub const NodeId = u64;
+
 pub const Rect = struct {
+    node_id: NodeId,
     id: ?[]const u8,
     size: Vector,
     position: ?Vector,
@@ -44,6 +48,7 @@ pub const Rect = struct {
 };
 
 pub const Transform = struct {
+    node_id: NodeId,
     id: ?[]const u8,
     position: ?Vector,
     local_position: Vector,
@@ -52,6 +57,7 @@ pub const Transform = struct {
 };
 
 pub const Text = struct {
+    node_id: NodeId,
     id: ?[]const u8,
     body: []const u8,
     color: Color,
@@ -288,9 +294,6 @@ pub fn makeNumberToken(line: usize, column: usize, offset: usize, potential_numb
     const new_token = makeToken(potential_number, line, column, offset);
     return new_token;
 }
-
-/// Stable identifier for scene nodes. Used for caching, diffing, and patch targeting.
-pub const NodeId = u64;
 
 /// Axis-aligned bounding box for dirty-rect tracking and tile scheduling.
 pub const Bounds = struct {

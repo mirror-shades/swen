@@ -13,39 +13,37 @@ pub fn main() !void {
 
     const source = try std.fs.cwd().readFile(file, &source_buffer);
 
-    std.debug.print("source file: \n\n{s}\n", .{source});
+    std.debug.print("+++++ source file: {s} +++++\n\n", .{file});
+    std.debug.print("{s}\n\n", .{source});
 
     try lexer.lex(source, &token_array);
+    std.debug.print("+++++ token array: +<insert>+\n\n", .{});
     for (token_array.getArray()) |token| {
         std.debug.print("token: {t} {s}\n", .{ token.tag, token.literal });
     }
+    std.debug.print("\n", .{});
 
     var node_array = memory.NodeArray.init();
     var root = try parser.parse(&token_array, &node_array);
     printer.printAST(&root);
 
     var rect_array = memory.RectArray.init();
+    var ir_array = memory.IRArray.init();
     var ctx = try compositor.Compositor.init(
         root.desktop.size,
         null, // background is now a node
     );
     defer ctx.deinit();
 
-    // Initial scene.
-    const scene = try compositor.buildSceneFromRoot(root, &rect_array);
-    try ctx.setScene(scene);
+    // Collect initial rectangles and lower to IR.
+    try compositor.collectRectsFromRoot(root, &rect_array);
+    compositor.lowerSceneToIR(root, &ir_array);
 
-    var dirty = false;
     while (ctx.running) {
         ctx.pumpEvents();
 
-        if (dirty) {
-            const new_scene = try compositor.buildSceneFromRoot(root, &rect_array);
-            try ctx.setScene(new_scene);
-            dirty = false;
-        }
-
-        ctx.renderFrame();
+        // Render the current frame via IR; node_ids can be used for caching/diffing later.
+        ctx.renderIRFrame(ir_array.getArray());
         std.Thread.sleep(16 * std.time.ns_per_ms);
     }
 }

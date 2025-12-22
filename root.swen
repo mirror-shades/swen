@@ -28,7 +28,7 @@ root {
                             }
                             text {
                                 position (10, 10)
-                                text_size 48
+                                text_size 24
                                 body "hello world"
                             }   
                         ]

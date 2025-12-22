@@ -1,29 +1,21 @@
 const std = @import("std");
-const math = std.math;
 const types = @import("../core/types.zig");
 const Color = types.Color;
 const Vector = types.Vector;
 const Rect = types.Rect;
+const Instruction = types.Instruction;
+const Bounds = types.Bounds;
+const TextRef = types.TextRef;
 const memory = @import("../core/memory.zig");
 const reporter = @import("../utils/reporter.zig");
 const Error = reporter.Error;
 
-const default_font_postscript_name = "LiberationSans";
-const default_text_size: u16 = 14;
-
-const c = @cImport({
-    @cDefine("SDL_MAIN_HANDLED", "1");
-    @cInclude("SDL2/SDL.h");
-    @cInclude("pathfinder.h");
-});
+const sdl = @import("sdl");
+const c = sdl.c;
 
 pub const Compositor = struct {
     window: *c.SDL_Window,
-    gl_context: c.SDL_GLContext,
-    renderer: c.PFGLRendererRef,
-    resources: c.PFResourceLoaderRef,
-    build_options: c.PFBuildOptionsRef,
-    scene_proxy: ?c.PFSceneProxyRef = null,
+    renderer: *c.SDL_Renderer,
     running: bool = true,
 
     pub fn init(size: Vector, desktop_background: ?Color) !Compositor {
@@ -33,124 +25,188 @@ pub const Compositor = struct {
 
         errdefer c.SDL_Quit();
 
-        try setGlAttribute(c.SDL_GL_CONTEXT_MAJOR_VERSION, 4);
-        try setGlAttribute(c.SDL_GL_CONTEXT_MINOR_VERSION, 3);
-        try setGlAttribute(
-            c.SDL_GL_CONTEXT_PROFILE_MASK,
-            @as(i32, @intCast(c.SDL_GL_CONTEXT_PROFILE_CORE)),
-        );
-        try setGlAttribute(c.SDL_GL_DOUBLEBUFFER, 1);
-
         const window = c.SDL_CreateWindow(
             "swen compositor",
             c.SDL_WINDOWPOS_CENTERED,
             c.SDL_WINDOWPOS_CENTERED,
             size.x,
             size.y,
-            c.SDL_WINDOW_OPENGL | c.SDL_WINDOW_SHOWN,
+            c.SDL_WINDOW_SHOWN,
         ) orelse {
             return reporter.throwRuntimeError("failed to create SDL window", Error.WindowCreateFailed);
         };
         errdefer c.SDL_DestroyWindow(window);
 
-        const gl_context = c.SDL_GL_CreateContext(window) orelse {
-            return reporter.throwRuntimeError("failed to create OpenGL context", Error.GLContextCreateFailed);
+        const renderer = c.SDL_CreateRenderer(window, -1, c.SDL_RENDERER_ACCELERATED) orelse {
+            return reporter.throwRuntimeError("failed to create SDL renderer", Error.RendererCreateFailed);
         };
-        errdefer c.SDL_GL_DeleteContext(gl_context);
+        errdefer c.SDL_DestroyRenderer(renderer);
 
-        if (c.SDL_GL_MakeCurrent(window, gl_context) != 0) {
-            return reporter.throwRuntimeError("failed to activate OpenGL context", Error.GLContextMakeCurrentFailed);
+        // Enable alpha blending so rect background alpha values are respected.
+        _ = c.SDL_SetRenderDrawBlendMode(renderer, c.SDL_BLENDMODE_BLEND);
+
+        // Set background color if provided
+        if (desktop_background) |bg| {
+            _ = c.SDL_SetRenderDrawColor(renderer, bg.r, bg.g, bg.b, bg.a);
+        } else {
+            _ = c.SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // Default black background
         }
-
-        _ = c.SDL_GL_SetSwapInterval(1);
-        c.PFGLLoadWith(glFunctionLoader, null);
-
-        const window_size = c.PFVector2I{
-            .x = size.x,
-            .y = size.y,
-        };
-
-        const dest_framebuffer = c.PFGLDestFramebufferCreateFullWindow(&window_size);
-        if (dest_framebuffer == null) {
-            return reporter.throwRuntimeError("failed to create destination framebuffer", Error.GLDestFramebufferCreateFailed);
-        }
-        var dest_owned = true;
-        defer if (dest_owned) c.PFGLDestFramebufferDestroy(dest_framebuffer);
-
-        const gl_device = c.PFGLDeviceCreate(c.PF_GL_VERSION_GL4, 0);
-        if (gl_device == null) {
-            return reporter.throwRuntimeError("failed to create OpenGL device", Error.GLDeviceCreateFailed);
-        }
-        var device_owned = true;
-        defer if (device_owned) c.PFGLDeviceDestroy(gl_device);
-
-        const resources = c.PFEmbeddedResourceLoaderCreate();
-        if (resources == null) {
-            return reporter.throwRuntimeError("failed to create embedded resource loader", Error.ResourceLoaderCreateFailed);
-        }
-        errdefer c.PFResourceLoaderDestroy(resources);
-
-        var renderer_mode = c.PFRendererMode{ .level = c.PF_RENDERER_LEVEL_D3D11 };
-        var renderer_options = makeRendererOptions(dest_framebuffer, desktop_background);
-
-        const renderer = c.PFGLRendererCreate(gl_device, resources, &renderer_mode, &renderer_options);
-        if (renderer == null) {
-            return reporter.throwRuntimeError("failed to create renderer", Error.RendererCreateFailed);
-        }
-        // renderer takes ownership of gl_device + dest_framebuffer on success.
-        dest_owned = false;
-        device_owned = false;
-
-        errdefer c.PFGLRendererDestroy(renderer);
-
-        const build_options = c.PFBuildOptionsCreate();
-        if (build_options == null) {
-            return reporter.throwRuntimeError("failed to create build options", Error.BuildOptionsCreateFailed);
-        }
-        errdefer c.PFBuildOptionsDestroy(build_options);
 
         return .{
             .window = window,
-            .gl_context = gl_context,
             .renderer = renderer,
-            .resources = resources,
-            .build_options = build_options,
         };
     }
 
     pub fn deinit(self: *Compositor) void {
-        if (self.scene_proxy) |proxy| {
-            c.PFSceneProxyDestroy(proxy);
-            self.scene_proxy = null;
-        }
-        c.PFBuildOptionsDestroy(self.build_options);
-        c.PFGLRendererDestroy(self.renderer);
-        c.PFResourceLoaderDestroy(self.resources);
-
-        c.SDL_GL_DeleteContext(self.gl_context);
+        c.SDL_DestroyRenderer(self.renderer);
         c.SDL_DestroyWindow(self.window);
         c.SDL_Quit();
     }
 
-    pub fn setScene(self: *Compositor, scene: c.PFSceneRef) !void {
-        if (self.scene_proxy) |proxy| {
-            c.PFSceneProxyDestroy(proxy);
-            self.scene_proxy = null;
+    pub fn renderScene(self: *Compositor, rects: []const Rect) !void {
+        // Clear the screen
+        _ = c.SDL_RenderClear(self.renderer);
+
+        // Render all rectangles
+        for (rects) |rect| {
+            try self.renderRect(rect);
         }
 
-        const scene_proxy = c.PFSceneProxyCreateFromSceneAndRayonExecutor(
-            scene,
-            c.PF_RENDERER_LEVEL_D3D11,
-        );
-        if (scene_proxy == null) {
-            // If proxy creation fails, clean up the scene to avoid leaking.
-            c.PFSceneDestroy(scene);
-            return reporter.throwRuntimeError("failed to create scene proxy", Error.SceneProxyCreateFailed);
+        // Present the rendered frame
+        c.SDL_RenderPresent(self.renderer);
+    }
+
+    // Additional SDL2 drawing primitives that can be used for custom rendering
+
+    pub fn drawLine(self: *Compositor, x1: i32, y1: i32, x2: i32, y2: i32, color: Color) void {
+        _ = c.SDL_SetRenderDrawColor(self.renderer, color.r, color.g, color.b, color.a);
+        _ = c.SDL_RenderDrawLine(self.renderer, x1, y1, x2, y2);
+    }
+
+    pub fn drawPoint(self: *Compositor, x: i32, y: i32, color: Color) void {
+        _ = c.SDL_SetRenderDrawColor(self.renderer, color.r, color.g, color.b, color.a);
+        _ = c.SDL_RenderDrawPoint(self.renderer, x, y);
+    }
+
+    pub fn drawRectOutline(self: *Compositor, x: i32, y: i32, w: i32, h: i32, color: Color) void {
+        _ = c.SDL_SetRenderDrawColor(self.renderer, color.r, color.g, color.b, color.a);
+        const sdl_rect = c.SDL_Rect{ .x = x, .y = y, .w = w, .h = h };
+        _ = c.SDL_RenderDrawRect(self.renderer, &sdl_rect);
+    }
+
+    pub fn drawRectFilled(self: *Compositor, x: i32, y: i32, w: i32, h: i32, color: Color) void {
+        _ = c.SDL_SetRenderDrawColor(self.renderer, color.r, color.g, color.b, color.a);
+        const sdl_rect = c.SDL_Rect{ .x = x, .y = y, .w = w, .h = h };
+        _ = c.SDL_RenderFillRect(self.renderer, &sdl_rect);
+    }
+
+    const Glyph = struct {
+        data: [7]u8,
+    };
+
+    fn glyphForChar(ch: u8) ?Glyph {
+        return switch (ch) {
+            ' ' => Glyph{ .data = .{ 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000, 0b00000 } },
+            'h' => Glyph{ .data = .{ 0b10000, 0b10000, 0b11110, 0b10010, 0b10010, 0b10010, 0b00000 } },
+            'e' => Glyph{ .data = .{ 0b01110, 0b10000, 0b11110, 0b10000, 0b10000, 0b01110, 0b00000 } },
+            'l' => Glyph{ .data = .{ 0b01000, 0b01000, 0b01000, 0b01000, 0b01000, 0b00100, 0b00000 } },
+            'o' => Glyph{ .data = .{ 0b01100, 0b10010, 0b10010, 0b10010, 0b10010, 0b01100, 0b00000 } },
+            'w' => Glyph{ .data = .{ 0b10001, 0b10001, 0b10101, 0b10101, 0b01010, 0b01010, 0b00000 } },
+            'r' => Glyph{ .data = .{ 0b10110, 0b11001, 0b10000, 0b10000, 0b10000, 0b10000, 0b00000 } },
+            'd' => Glyph{ .data = .{ 0b00010, 0b00010, 0b01110, 0b10010, 0b10010, 0b01110, 0b00000 } },
+            else => null,
+        };
+    }
+
+    fn drawGlyph(self: *Compositor, x: i32, y: i32, color: Color, glyph: Glyph, scale: i32) void {
+        var row: usize = 0;
+        while (row < glyph.data.len) : (row += 1) {
+            const bits: u8 = glyph.data[row];
+            var col: usize = 0;
+            while (col < 5) : (col += 1) {
+                const shift: u3 = @intCast(4 - col);
+                const mask: u8 = @as(u8, 1) << shift;
+                if ((bits & mask) != 0) {
+                    const px = x + @as(i32, @intCast(col)) * scale;
+                    const py = y + @as(i32, @intCast(row)) * scale;
+                    self.drawRectFilled(px, py, scale, scale, color);
+                }
+            }
+        }
+    }
+
+    fn drawText(self: *Compositor, x: i32, y: i32, color: Color, text: []const u8, text_size: u16) void {
+        const base_scale: i32 = 1;
+        const scale: i32 = blk: {
+            if (text_size <= 8) break :blk base_scale;
+            break :blk @as(i32, @intCast(text_size / 8));
+        };
+
+        var cursor_x = x;
+        var i: usize = 0;
+        while (i < text.len) : (i += 1) {
+            const ch = text[i];
+            if (glyphForChar(ch)) |glyph| {
+                self.drawGlyph(cursor_x, y, color, glyph, scale);
+                cursor_x += (5 * scale) + scale;
+            } else {
+                // Fallback spacing for unsupported characters
+                cursor_x += (5 * scale) + scale;
+            }
+        }
+    }
+
+    fn renderRect(self: *Compositor, rect: Rect) !void {
+        if (rect.position == null) return;
+
+        const world_x = rect.position.?.x + rect.local_position.x;
+        const world_y = rect.position.?.y + rect.local_position.y;
+
+        const sdl_rect = c.SDL_Rect{
+            .x = world_x,
+            .y = world_y,
+            .w = rect.size.x,
+            .h = rect.size.y,
+        };
+
+        // Draw filled rectangle if background color is set
+        if (rect.background) |background| {
+            _ = c.SDL_SetRenderDrawColor(self.renderer, background.r, background.g, background.b, background.a);
+            _ = c.SDL_RenderFillRect(self.renderer, &sdl_rect);
         }
 
-        // Note: we intentionally do NOT destroy `scene` here; the existing codebase treats the proxy
-        // as the owner of the scene.
-        self.scene_proxy = scene_proxy;
+        // Draw rectangle outline (stroke) - thin black border for now
+        _ = c.SDL_SetRenderDrawColor(self.renderer, 0, 0, 0, 255);
+        _ = c.SDL_RenderDrawRect(self.renderer, &sdl_rect);
+
+        // Render children recursively
+        if (rect.children) |children| {
+            for (children) |child| {
+                switch (child) {
+                    .rect => |child_rect| {
+                        // Create a modified rect with updated local position
+                        var modified_rect = child_rect;
+                        modified_rect.local_position.x += world_x;
+                        modified_rect.local_position.y += world_y;
+                        try self.renderRect(modified_rect);
+                    },
+                    .text => |text_node| {
+                        if (text_node.position) |pos| {
+                            if (text_node.text_size) |size| {
+                                const text_x = pos.x + text_node.local_position.x;
+                                const text_y = pos.y + text_node.local_position.y;
+                                self.drawText(text_x, text_y, text_node.color, text_node.body, size);
+                            }
+                        }
+                    },
+                    .transform => |transform_node| {
+                        // TODO: Implement transform handling
+                        _ = transform_node;
+                    },
+                }
+            }
+        }
     }
 
     pub fn pumpEvents(self: *Compositor) void {
@@ -162,74 +218,225 @@ pub const Compositor = struct {
         }
     }
 
-    pub fn renderFrame(self: *Compositor) void {
-        if (self.scene_proxy) |proxy| {
-            c.PFSceneProxyBuildAndRenderGL(proxy, self.renderer, self.build_options);
-            c.SDL_GL_SwapWindow(self.window);
+    pub fn renderFrame(self: *Compositor, rects: []const Rect) void {
+        self.renderScene(rects) catch |err| {
+            std.debug.print("Render error: {}\n", .{err});
+        };
+    }
+
+    pub fn renderIRFrame(self: *Compositor, ir: []const Instruction) void {
+        // Clear the screen
+        _ = c.SDL_RenderClear(self.renderer);
+
+        for (ir) |inst| {
+            switch (inst) {
+                .draw_rect => |dr| {
+                    self.drawRectFilled(dr.bounds.x, dr.bounds.y, dr.bounds.width, dr.bounds.height, dr.color);
+                },
+                .draw_text => |dt| {
+                    const text_slice = switch (dt.text) {
+                        .inline_text => |inline_text| inline_text.data[0..inline_text.len],
+                        .interned => |_| @as([]const u8, &[_]u8{}),
+                    };
+                    self.drawText(dt.bounds.x, dt.bounds.y, dt.color, text_slice, dt.text_size);
+                },
+                else => {},
+            }
         }
+
+        c.SDL_RenderPresent(self.renderer);
     }
 };
 
-pub fn buildSceneFromRoot(
+pub fn lowerSceneToIR(
+    root: types.Root,
+    ir_buffer: *memory.FixedArray(Instruction, 4096),
+) void {
+    ir_buffer.length = 0;
+    if (root.desktop.nodes) |nodes| {
+        // Track which node_ids are referenced as children so we only
+        // start lowering from true roots.
+        var is_child: [4096]bool = [_]bool{false} ** 4096;
+
+        // First pass: mark all child node ids.
+        for (nodes) |node| {
+            switch (node) {
+                .rect => |rect| {
+                    if (rect.children) |children| {
+                        for (children) |child| {
+                            const child_id: types.NodeId = switch (child) {
+                                .rect => |r| r.node_id,
+                                .text => |t| t.node_id,
+                                .transform => |tr| tr.node_id,
+                            };
+                            if (child_id > 0 and child_id <= is_child.len) {
+                                is_child[child_id - 1] = true;
+                            }
+                        }
+                    }
+                },
+                .transform => |transform| {
+                    if (transform.children) |children| {
+                        for (children) |child| {
+                            const child_id: types.NodeId = switch (child) {
+                                .rect => |r| r.node_id,
+                                .text => |t| t.node_id,
+                                .transform => |tr| tr.node_id,
+                            };
+                            if (child_id > 0 and child_id <= is_child.len) {
+                                is_child[child_id - 1] = true;
+                            }
+                        }
+                    }
+                },
+                else => {},
+            }
+        }
+
+        // Second pass: lower only true roots (not referenced as children).
+        for (nodes) |node| {
+            const id: types.NodeId = switch (node) {
+                .rect => |r| r.node_id,
+                .text => |t| t.node_id,
+                .transform => |tr| tr.node_id,
+            };
+
+            if (id > 0 and id <= is_child.len and is_child[id - 1]) {
+                continue;
+            }
+
+            lowerNodeToIR(node, ir_buffer);
+        }
+    }
+}
+
+fn lowerNodeToIR(
+    node: types.Node,
+    ir_buffer: *memory.FixedArray(Instruction, 4096),
+) void {
+    switch (node) {
+        .rect => |rect| {
+            lowerRectToIR(rect, ir_buffer);
+        },
+        .text => |text| {
+            lowerTextToIR(text, ir_buffer);
+        },
+        .transform => |transform| {
+            if (transform.children) |children| {
+                for (children) |child| {
+                    lowerNodeToIR(child, ir_buffer);
+                }
+            }
+        },
+    }
+}
+
+fn lowerRectToIR(
+    rect: types.Rect,
+    ir_buffer: *memory.FixedArray(Instruction, 4096),
+) void {
+    const base_pos = rect.position orelse Vector{ .x = 0, .y = 0 };
+    const world_x = base_pos.x + rect.local_position.x;
+    const world_y = base_pos.y + rect.local_position.y;
+
+    const bounds = Bounds{
+        .x = world_x,
+        .y = world_y,
+        .width = rect.size.x,
+        .height = rect.size.y,
+    };
+
+    const color = rect.background orelse Color{ .r = 0, .g = 0, .b = 0, .a = 0 };
+
+    ir_buffer.push(Instruction{
+        .draw_rect = .{
+            .node_id = rect.node_id,
+            .bounds = bounds,
+            .color = color,
+            .corner_radius = 0,
+        },
+    });
+
+    if (rect.children) |children| {
+        for (children) |child| {
+            lowerNodeToIR(child, ir_buffer);
+        }
+    }
+}
+
+fn lowerTextToIR(
+    text: types.Text,
+    ir_buffer: *memory.FixedArray(Instruction, 4096),
+) void {
+    const pos = text.position orelse Vector{ .x = 0, .y = 0 };
+    const world_x = pos.x + text.local_position.x;
+    const world_y = pos.y + text.local_position.y;
+
+    const size = text.text_size orelse 12;
+    const scale: i32 = if (size <= 8) 1 else @as(i32, @intCast(size / 8));
+    const width = @as(i32, @intCast(text.body.len)) * (5 * scale + scale);
+    const height = 7 * scale;
+
+    const bounds = Bounds{
+        .x = world_x,
+        .y = world_y,
+        .width = width,
+        .height = height,
+    };
+
+    var text_ref = TextRef{ .inline_text = .{ .data = undefined, .len = 0 } };
+    const max_copy = @min(text.body.len, text_ref.inline_text.data.len);
+    std.mem.copyForwards(u8, text_ref.inline_text.data[0..max_copy], text.body[0..max_copy]);
+    text_ref.inline_text.len = @as(u8, @intCast(max_copy));
+
+    ir_buffer.push(Instruction{
+        .draw_text = .{
+            .node_id = text.node_id,
+            .bounds = bounds,
+            .text = text_ref,
+            .color = text.color,
+            .text_size = size,
+        },
+    });
+}
+
+pub fn collectRectsFromRoot(
     root: types.Root,
     rect_buffer: *memory.FixedArray(Rect, 4096),
-) !c.PFSceneRef {
+) !void {
     const size = root.desktop.size;
     if (size.x <= 0 or size.y <= 0) {
         return reporter.throwRuntimeError("desktop must have a positive size", Error.InvalidSurfaceSize);
     }
 
     rect_buffer.length = 0;
-    prepareDesktopSceneData(root.desktop, rect_buffer);
-    return buildScene(root.desktop, rect_buffer, size);
+    collectDesktopRects(root.desktop, rect_buffer);
 }
 
-fn buildScene(desktop: types.Desktop, rect_buffer: *memory.FixedArray(Rect, 4096), size: Vector) !c.PFSceneRef {
-    const canvas_size = c.PFVector2F{
-        .x = @floatFromInt(size.x),
-        .y = @floatFromInt(size.y),
-    };
+pub fn renderIRFrame(self: *Compositor, ir: []const Instruction) void {
+    // Clear the screen
+    _ = c.SDL_RenderClear(self.renderer);
 
-    const font_context = c.PFCanvasFontContextCreateWithSystemSource();
-    if (font_context == null) {
-        return reporter.throwRuntimeError("failed to create canvas font context", Error.FontContextUnavailable);
-    }
-    defer c.PFCanvasFontContextRelease(font_context);
-
-    const canvas = c.PFCanvasCreate(font_context, &canvas_size);
-    if (canvas == null) {
-        return reporter.throwRuntimeError("failed to create canvas", Error.CanvasCreateFailed);
-    }
-    var canvas_owned = true;
-    defer if (canvas_owned) c.PFCanvasDestroy(canvas);
-    try initializeCanvasTextState(canvas);
-
-    // Draw all rect nodes in order (first node = bottom layer, last = top)
-    for (0..rect_buffer.getLength()) |idx| {
-        const rect = rect_buffer.getItem(idx);
-        if (rect.background) |background| {
-            const pf_rect = try rectToPfRect(rect);
-            try fillCanvasRect(canvas, background, pf_rect);
+    for (ir) |inst| {
+        switch (inst) {
+            .draw_rect => |dr| {
+                self.drawRectFilled(dr.bounds.x, dr.bounds.y, dr.bounds.width, dr.bounds.height, dr.color);
+            },
+            .draw_text => |dt| {
+                const text_slice = switch (dt.text) {
+                    .inline_text => |inline_text| inline_text.data[0..inline_text.len],
+                    .interned => |_| @as([]const u8, &[_]u8{}),
+                };
+                self.drawText(dt.bounds.x, dt.bounds.y, dt.color, text_slice, dt.text_size);
+            },
+            else => {},
         }
     }
 
-    if (desktop.nodes) |nodes| {
-        try drawTextNodes(canvas, nodes);
-    }
-
-    const scene = c.PFCanvasCreateScene(canvas);
-    if (scene == null) {
-        return reporter.throwRuntimeError("failed to create scene from canvas", Error.SceneCreateFailed);
-    }
-    canvas_owned = false;
-
-    return scene;
+    c.SDL_RenderPresent(self.renderer);
 }
 
-// NOTE: the old `renderScene()` (which owned an internal infinite loop) has been replaced by the
-// `Compositor` context API above. Rendering is now driven by the caller (e.g. `main.zig`).
-
-fn prepareDesktopSceneData(
+fn collectDesktopRects(
     desktop: types.Desktop,
     rect_buffer: *memory.FixedArray(Rect, 4096),
 ) void {
@@ -261,168 +468,4 @@ fn pushRectWithChildren(
             }
         }
     }
-}
-
-fn fillCanvasRect(canvas: c.PFCanvasRef, color: Color, pf_rect: c.PFRectF) !void {
-    try setCanvasFillColor(canvas, color);
-    var rect_copy = pf_rect;
-    c.PFCanvasFillRect(canvas, &rect_copy);
-}
-
-fn setCanvasFillColor(canvas: c.PFCanvasRef, color: Color) !void {
-    var pf_color = toPfColor(color);
-    const fill_style = c.PFFillStyleCreateColor(&pf_color);
-    if (fill_style == null) {
-        return reporter.throwRuntimeError("failed to create fill style", Error.FillStyleCreateFailed);
-    }
-    defer c.PFFillStyleDestroy(fill_style);
-
-    c.PFCanvasSetFillStyle(canvas, fill_style);
-}
-
-fn rectToPfRect(rect: Rect) !c.PFRectF {
-    if (rect.position) |position| {
-        const world_x = rect.local_position.x + position.x;
-        const world_y = rect.local_position.y + position.y;
-
-        const origin = c.PFVector2F{
-            .x = @floatFromInt(world_x),
-            .y = @floatFromInt(world_y),
-        };
-        const lower_right = c.PFVector2F{
-            .x = @floatFromInt(world_x + rect.size.x),
-            .y = @floatFromInt(world_y + rect.size.y),
-        };
-
-        return .{
-            .origin = origin,
-            .lower_right = lower_right,
-        };
-    }
-    return reporter.throwRuntimeError("rect must have a position", Error.MissingProperty);
-}
-
-fn makeCanvasRect(size: Vector) c.PFRectF {
-    const origin = c.PFVector2F{ .x = 0, .y = 0 };
-    const lower_right = c.PFVector2F{
-        .x = @floatFromInt(size.x),
-        .y = @floatFromInt(size.y),
-    };
-
-    return .{
-        .origin = origin,
-        .lower_right = lower_right,
-    };
-}
-
-fn toPfColor(color: Color) c.PFColorU {
-    return .{
-        .r = color.r,
-        .g = color.g,
-        .b = color.b,
-        .a = color.a,
-    };
-}
-
-fn toPfColorF(color: Color) c.PFColorF {
-    return .{
-        .r = @as(f32, @floatFromInt(color.r)) / 255.0,
-        .g = @as(f32, @floatFromInt(color.g)) / 255.0,
-        .b = @as(f32, @floatFromInt(color.b)) / 255.0,
-        .a = @as(f32, @floatFromInt(color.a)) / 255.0,
-    };
-}
-
-fn makeRendererOptions(
-    dest: c.PFDestFramebufferRef,
-    background: ?Color,
-) c.PFRendererOptions {
-    const bg_color = background orelse defaultBackgroundColor();
-    const has_background = background != null;
-    return .{
-        .dest = dest,
-        .background_color = toPfColorF(bg_color),
-        .flags = if (has_background) c.PF_RENDERER_OPTIONS_FLAGS_HAS_BACKGROUND_COLOR else 0,
-    };
-}
-
-fn setGlAttribute(attr: c.SDL_GLattr, value: i32) !void {
-    if (c.SDL_GL_SetAttribute(attr, value) != 0) {
-        return reporter.throwRuntimeError("failed to set SDL GL attribute", Error.SDLGLAttributeFailed);
-    }
-}
-
-fn toI32(value: usize) !i32 {
-    if (value > math.maxInt(i32)) {
-        return reporter.throwRuntimeError("value exceeds 32-bit integer range", Error.DimensionTooLarge);
-    }
-    return @as(i32, @intCast(value));
-}
-
-fn glFunctionLoader(name: [*c]const u8, userdata: ?*anyopaque) callconv(.c) ?*const anyopaque {
-    _ = userdata;
-    return c.SDL_GL_GetProcAddress(name);
-}
-
-fn defaultBackgroundColor() Color {
-    return Color{ .r = 0, .g = 0, .b = 0, .a = 255 };
-}
-
-fn initializeCanvasTextState(canvas: c.PFCanvasRef) !void {
-    try setCanvasFont(canvas, default_font_postscript_name);
-    c.PFCanvasSetTextAlign(canvas, c.PF_TEXT_ALIGN_LEFT);
-    c.PFCanvasSetTextBaseline(canvas, c.PF_TEXT_BASELINE_TOP);
-}
-
-fn setCanvasFont(canvas: c.PFCanvasRef, font_name: []const u8) !void {
-    const name_ptr: [*c]const u8 = @ptrCast(font_name.ptr);
-    const result = c.PFCanvasSetFontByPostScriptName(canvas, name_ptr, font_name.len);
-    if (result != 0) {
-        return reporter.throwRuntimeError("font is not available", Error.FontUnavailable);
-    }
-}
-
-fn drawTextNodes(canvas: c.PFCanvasRef, nodes: []const types.Node) !void {
-    for (nodes) |node| {
-        switch (node) {
-            .rect => |rect| {
-                if (rect.children) |children| {
-                    try drawTextNodes(canvas, children);
-                }
-            },
-            .text => |text| {
-                try drawSingleText(canvas, text);
-            },
-            .transform => |transform| {
-                if (transform.children) |children| {
-                    try drawTextNodes(canvas, children);
-                }
-            },
-        }
-    }
-}
-
-fn drawSingleText(canvas: c.PFCanvasRef, text: types.Text) !void {
-    const world_position = textWorldPosition(text);
-    const pf_position = c.PFVector2F{
-        .x = @as(f32, @floatFromInt(world_position.x)),
-        .y = @as(f32, @floatFromInt(world_position.y)),
-    };
-
-    const font_size_value = @as(u16, text.text_size orelse default_text_size);
-    const font_size = @as(f32, @floatFromInt(font_size_value));
-    c.PFCanvasSetFontSize(canvas, font_size);
-
-    try setCanvasFillColor(canvas, text.color);
-
-    const text_ptr: [*c]const u8 = @ptrCast(text.body.ptr);
-    c.PFCanvasFillText(canvas, text_ptr, text.body.len, &pf_position);
-}
-
-fn textWorldPosition(text: types.Text) Vector {
-    const pos = text.position.?;
-    return .{
-        .x = text.local_position.x + pos.x,
-        .y = text.local_position.y + pos.y,
-    };
 }

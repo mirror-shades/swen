@@ -11,17 +11,20 @@ const Color = types.Color;
 const Vector = types.Vector;
 const Text = types.Text;
 const Rect = types.Rect;
+const NodeId = types.NodeId;
 
 const TokenTracker = struct {
     tokens: *memory.FixedArray(Token, 4096),
     nodes: *memory.FixedArray(Node, 4096),
     index: usize,
+    next_node_id: NodeId,
 
     pub fn init(tokens: *memory.FixedArray(Token, 4096), nodes: *memory.FixedArray(Node, 4096)) TokenTracker {
         return TokenTracker{
             .tokens = tokens,
             .nodes = nodes,
             .index = 0,
+            .next_node_id = 1,
         };
     }
 
@@ -105,8 +108,79 @@ fn parseDesktop(
             },
             .nodes => {
                 tracker.advance();
-                const nodes_slice = try parseNodeArray(tracker, Vector{ .x = 0, .y = 0 });
-                desktop.nodes = nodes_slice;
+                const all_nodes = try parseNodeArray(tracker, Vector{ .x = 0, .y = 0 });
+
+                // Build a pure tree for the desktop: ensure each node has exactly
+                // one parent by filtering out nodes that are referenced as children.
+                var is_child: [4096]bool = [_]bool{false} ** 4096;
+
+                // First pass: mark every node_id that appears as a child.
+                for (all_nodes) |node| {
+                    switch (node) {
+                        .rect => |rect| {
+                            if (rect.children) |children| {
+                                for (children) |child| {
+                                    const child_id: NodeId = switch (child) {
+                                        .rect => |r| r.node_id,
+                                        .text => |t| t.node_id,
+                                        .transform => |tr| tr.node_id,
+                                    };
+                                    if (child_id > 0 and child_id <= is_child.len) {
+                                        is_child[child_id - 1] = true;
+                                    }
+                                }
+                            }
+                        },
+                        .transform => |transform| {
+                            if (transform.children) |children| {
+                                for (children) |child| {
+                                    const child_id: NodeId = switch (child) {
+                                        .rect => |r| r.node_id,
+                                        .text => |t| t.node_id,
+                                        .transform => |tr| tr.node_id,
+                                    };
+                                    if (child_id > 0 and child_id <= is_child.len) {
+                                        is_child[child_id - 1] = true;
+                                    }
+                                }
+                            }
+                        },
+                        else => {},
+                    }
+                }
+
+                // Count root nodes (those not marked as children).
+                var root_count: usize = 0;
+                for (all_nodes) |node| {
+                    const id: NodeId = switch (node) {
+                        .rect => |r| r.node_id,
+                        .text => |t| t.node_id,
+                        .transform => |tr| tr.node_id,
+                    };
+                    if (id == 0) continue;
+                    if (id <= is_child.len and is_child[id - 1]) continue;
+                    root_count += 1;
+                }
+
+                var allocator = std.heap.page_allocator;
+                const root_nodes = allocator.alloc(types.Node, root_count) catch {
+                    return reporter.throwRuntimeError("failed to allocate desktop node roots", Error.SceneCreateFailed);
+                };
+
+                var idx: usize = 0;
+                for (all_nodes) |node| {
+                    const id: NodeId = switch (node) {
+                        .rect => |r| r.node_id,
+                        .text => |t| t.node_id,
+                        .transform => |tr| tr.node_id,
+                    };
+                    if (id == 0) continue;
+                    if (id <= is_child.len and is_child[id - 1]) continue;
+                    root_nodes[idx] = node;
+                    idx += 1;
+                }
+
+                desktop.nodes = root_nodes;
             },
             .workspaces => {
                 tracker.advance();
@@ -283,54 +357,87 @@ fn parseRectBody(tracker: *TokenTracker, local_position: Vector) Error!Rect {
             .nodes => {
                 tracker.advance();
 
-                if (!consumeTag(tracker, .lbracket)) {
-                    return reporter.throwError("expected opening bracket after nodes keyword", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedLeftBracket);
-                }
-
                 if (rect.position) |position| {
                     const child_local_position = Vector{
                         .x = local_position.x + position.x,
                         .y = local_position.y + position.y,
                     };
 
-                    const start_index = tracker.nodes.getLength();
-                    var closed_children = false;
-                    while (tracker.peek().tag != .eof) {
-                        const child_token = tracker.peek();
-                        switch (child_token.tag) {
-                            .rect => {
-                                tracker.advance();
-                                const child_rect = try parseRectBody(tracker, child_local_position);
-                                tracker.nodes.push(types.Node{ .rect = child_rect });
+                    // Parse all nested nodes, then filter to direct children by
+                    // removing anything that appears as a child of another node
+                    // in this subtree. This keeps the scene tree "pure": each
+                    // node has exactly one parent.
+                    const all_nodes = try parseNodeArray(tracker, child_local_position);
+
+                    var is_child: [4096]bool = [_]bool{false} ** 4096;
+
+                    // Mark all node_ids that appear as children within this slice.
+                    for (all_nodes) |node| {
+                        switch (node) {
+                            .rect => |r| {
+                                if (r.children) |children| {
+                                    for (children) |child| {
+                                        const child_id: NodeId = switch (child) {
+                                            .rect => |cr| cr.node_id,
+                                            .text => |ct| ct.node_id,
+                                            .transform => |ctf| ctf.node_id,
+                                        };
+                                        if (child_id > 0 and child_id <= is_child.len) {
+                                            is_child[child_id - 1] = true;
+                                        }
+                                    }
+                                }
                             },
-                            .text => {
-                                tracker.advance();
-                                const child_text = try parseTextBody(tracker, child_local_position);
-                                tracker.nodes.push(types.Node{ .text = child_text });
+                            .transform => |t| {
+                                if (t.children) |children| {
+                                    for (children) |child| {
+                                        const child_id: NodeId = switch (child) {
+                                            .rect => |cr| cr.node_id,
+                                            .text => |ct| ct.node_id,
+                                            .transform => |ctf| ctf.node_id,
+                                        };
+                                        if (child_id > 0 and child_id <= is_child.len) {
+                                            is_child[child_id - 1] = true;
+                                        }
+                                    }
+                                }
                             },
-                            .rbracket => {
-                                closed_children = true;
-                                tracker.advance();
-                                break;
-                            },
-                            .transform => {
-                                tracker.advance();
-                                const child_transform = try parseTransform(tracker, child_local_position);
-                                tracker.nodes.push(types.Node{ .transform = child_transform });
-                            },
-                            else => {
-                                std.debug.print("unexpected token found in rect body parsing at line {d} column {d} offset {d} in rect body parsing: {t} {s}\n", .{ child_token.span.line, child_token.span.column, child_token.span.offset, child_token.tag, child_token.literal });
-                                tracker.advance();
-                            },
+                            else => {},
                         }
                     }
 
-                    if (!closed_children) {
-                        return reporter.throwError("expected closing bracket after nodes declaration", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedRightBracket);
+                    // Count direct children (nodes whose id is not marked as child).
+                    var root_count: usize = 0;
+                    for (all_nodes) |node| {
+                        const id: NodeId = switch (node) {
+                            .rect => |r| r.node_id,
+                            .text => |t| t.node_id,
+                            .transform => |tr| tr.node_id,
+                        };
+                        if (id == 0) continue;
+                        if (id <= is_child.len and is_child[id - 1]) continue;
+                        root_count += 1;
                     }
 
-                    const all_nodes = tracker.nodes.getArray();
-                    rect.children = all_nodes[start_index..all_nodes.len];
+                    var allocator = std.heap.page_allocator;
+                    const root_nodes = allocator.alloc(types.Node, root_count) catch {
+                        return reporter.throwRuntimeError("failed to allocate rect children", Error.SceneCreateFailed);
+                    };
+
+                    var idx: usize = 0;
+                    for (all_nodes) |node| {
+                        const id: NodeId = switch (node) {
+                            .rect => |r| r.node_id,
+                            .text => |t| t.node_id,
+                            .transform => |tr| tr.node_id,
+                        };
+                        if (id == 0) continue;
+                        if (id <= is_child.len and is_child[id - 1]) continue;
+                        root_nodes[idx] = node;
+                        idx += 1;
+                    }
+
+                    rect.children = root_nodes;
                 } else {
                     return reporter.throwError("expected position before nodes in rect", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
                 }
@@ -365,6 +472,8 @@ fn parseRectBody(tracker: *TokenTracker, local_position: Vector) Error!Rect {
         return reporter.throwError("expected background in rect node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
     }
 
+    rect.node_id = tracker.next_node_id;
+    tracker.next_node_id += 1;
     return rect;
 }
 
@@ -374,6 +483,7 @@ fn parseTransform(tracker: *TokenTracker, local_position: Vector) !types.Transfo
     }
 
     var transform = types.Transform{
+        .node_id = 0,
         .id = null,
         .position = null,
         .local_position = local_position,
@@ -436,6 +546,8 @@ fn parseTransform(tracker: *TokenTracker, local_position: Vector) !types.Transfo
     }
 
     transform.local_position = local_position;
+    transform.node_id = tracker.next_node_id;
+    tracker.next_node_id += 1;
     return transform;
 }
 
@@ -478,6 +590,7 @@ fn parseTextBody(tracker: *TokenTracker, local_position: Vector) !types.Text {
     }
 
     var text = Text{
+        .node_id = 0,
         .id = null,
         .body = "",
         .color = Color{ .r = 0, .g = 0, .b = 0, .a = 255 },
@@ -541,6 +654,8 @@ fn parseTextBody(tracker: *TokenTracker, local_position: Vector) !types.Text {
         return reporter.throwError("expected text size in text node", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
     }
     text.local_position = local_position;
+    text.node_id = tracker.next_node_id;
+    tracker.next_node_id += 1;
     return text;
 }
 
@@ -671,6 +786,7 @@ fn initDesktop() types.Desktop {
 
 fn initRect() Rect {
     return Rect{
+        .node_id = 0,
         .id = null,
         .size = types.Vector{ .x = 0, .y = 0 },
         .local_position = types.Vector{ .x = 0, .y = 0 },
