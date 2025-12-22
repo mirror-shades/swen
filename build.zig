@@ -1,9 +1,14 @@
 const std = @import("std");
 const sdl = @import("sdl");
+const builtin = @import("builtin");
 
 pub fn build(b: *std.Build) void {
     // Use host target by default, but allow override via command line
-    const target = b.standardTargetOptions(.{});
+    const default_target: std.Target.Query = if (builtin.os.tag == .windows)
+        .{ .abi = .msvc }
+    else
+        .{};
+    const target = b.standardTargetOptions(.{ .default_target = default_target });
     const optimize = b.standardOptimizeOption(.{});
 
     const target_info = target.result;
