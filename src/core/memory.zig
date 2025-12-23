@@ -5,6 +5,7 @@ pub const TokenArray = FixedArray(types.Token, 4096);
 pub const NodeArray = FixedArray(types.Node, 4096);
 pub const RectArray = FixedArray(types.Rect, 4096);
 pub const IRArray = FixedArray(types.Instruction, 4096);
+pub const WorkspaceArray = FixedArray(types.Workspace, 1024);
 
 pub fn FixedArray(comptime T: type, comptime N: usize) type {
     return struct {

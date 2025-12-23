@@ -118,7 +118,6 @@ fn parseDesktop(
     var has_size = false;
     var has_background = false;
     var has_nodes = false;
-    var has_workspaces = false;
     var closed = false;
     while (tracker.peek().tag != .eof) {
         const token = tracker.peek();
@@ -206,12 +205,6 @@ fn parseDesktop(
                 desktop.nodes = root_nodes;
                 has_nodes = true;
             },
-            .workspaces => {
-                tracker.advance();
-                const workspaces_slice = try parseWorkspaceArray(tracker, token);
-                desktop.workspaces = workspaces_slice;
-                has_workspaces = true;
-            },
             .rbrace => {
                 closed = true;
                 tracker.advance();
@@ -238,10 +231,6 @@ fn parseDesktop(
     if (!has_nodes) {
         return reporter.throwError("desktop node must have a nodes array", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
     }
-    if (!has_workspaces) {
-        return reporter.throwError("desktop node must have a workspaces array", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
-    }
-
     if (desktop.size.x <= 0 or desktop.size.y <= 0) {
         return reporter.throwError("desktop must have a positive size", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.InvalidSize);
     }

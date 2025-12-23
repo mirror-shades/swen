@@ -6,6 +6,7 @@ const compositor = @import("./render/compositor.zig");
 const codegen = @import("./codegen/codegen.zig");
 const memory = @import("./core/memory.zig");
 const types = @import("./core/types.zig");
+const workspaces = @import("./core/workspaces.zig");
 
 const sdl = @import("sdl");
 const c = sdl.c;
@@ -67,9 +68,11 @@ pub fn main() !void {
 
     var node_array = memory.NodeArray.init();
     var root = try parser.parse(&token_array, &node_array);
-    printer.printAST(&root);
 
-    std.debug.print("Using desktop size: {}x{}\n", .{ root.desktop.size.x, root.desktop.size.y });
+    var workspace_array = memory.WorkspaceArray.init();
+    workspaces.initialize_workspaces(&root, &workspace_array);
+
+    std.debug.print("desktop size: {}x{}\n\n", .{ root.desktop.size.x, root.desktop.size.y });
 
     var ir_array = memory.IRArray.init();
     var ctx = try compositor.Compositor.init(
@@ -79,6 +82,9 @@ pub fn main() !void {
     defer ctx.deinit();
 
     try codegen.generate(&root, &ir_array);
+
+    std.debug.print("inital scene tree: \n", .{});
+    printer.printSceneTree(&root);
 
     while (ctx.running) {
         ctx.pumpEvents();

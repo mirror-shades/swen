@@ -5,7 +5,7 @@ const iVector = types.iVector;
 const uVector = types.uVector;
 const memory = @import("../core/memory.zig");
 
-pub fn printAST(root: *types.Root) void {
+pub fn printSceneTree(root: *types.Root) void {
     printIndent(0);
     std.debug.print("Root\n", .{});
     printDesktop(root.desktop, 1);

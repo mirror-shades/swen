@@ -6,7 +6,7 @@ const render_ir = @import("ir.zig");
 var global_ir_buf: render_ir.IRBuffer = render_ir.IRBuffer.init();
 
 pub fn generate(root: *types.Root, ir_array: *memory.IRArray) !void {
-    if (root.desktop.active_workspace != null) {
+    if (root.desktop.active_workspace == null) {
         return error.NoActiveWorkspace;
     }
 

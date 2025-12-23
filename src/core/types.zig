@@ -96,7 +96,6 @@ pub const TokenTag = enum {
     clip,
 
     // properties
-    workspaces,
     app,
     nodes,
     id,
@@ -199,9 +198,7 @@ fn get_tag(word: []const u8) !TokenTag {
             }
         },
         'w' => {
-            if (std.mem.eql(u8, word, "workspaces")) {
-                tag = .workspaces;
-            } else if (std.mem.eql(u8, word, "wayland_surface")) {
+            if (std.mem.eql(u8, word, "wayland_surface")) {
                 tag = .wayland_surface;
             }
         },
@@ -268,14 +265,14 @@ pub fn makeToken(literal: []const u8, line: usize, column: usize, offset: usize)
     } else {
         const tag = try get_tag(literal);
         return Token{
-                .literal = literal,
-                .tag = tag,
-                .span = Span{
-                    .line = line,
-                    .column = column,
-                    .offset = offset,
-                },
-            };
+            .literal = literal,
+            .tag = tag,
+            .span = Span{
+                .line = line,
+                .column = column,
+                .offset = offset,
+            },
+        };
     }
 }
 
