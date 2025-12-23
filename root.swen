@@ -1,8 +1,8 @@
 root {
     system {}
     desktop {
-        size (1024, 720)
-
+        size ($screen_width, $screen_height)
+        background (50,50,50,255)
         nodes [
             rect {
                 id background

@@ -622,6 +622,16 @@ fn lowerTransform(ir_buf: *IRBuffer, transform: types.Transform, parent_pos: typ
 pub fn lowerDesktop(ir_buf: *IRBuffer, desktop: types.Desktop) IRError!void {
     ir_buf.nextFrame();
 
+    if (desktop.background) |bg_color| {
+        const bg_bounds = types.Bounds{
+            .x = 0,
+            .y = 0,
+            .width = desktop.size.x,
+            .height = desktop.size.y,
+        };
+        try ir_buf.emitRect(generateNodeId("desktop_background"), bg_bounds, bg_color, 0);
+    }
+
     if (desktop.nodes) |nodes| {
         const root_pos = types.Vector{ .x = 0, .y = 0 };
         for (nodes) |node| {

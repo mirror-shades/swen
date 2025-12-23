@@ -13,6 +13,7 @@ pub const Root = struct {
 
 pub const Desktop = struct {
     size: Vector,
+    background: ?Color,
     active_workspace: ?Workspace,
     nodes: ?[]Node,
     workspaces: ?[]Workspace,

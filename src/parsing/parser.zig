@@ -105,6 +105,10 @@ fn parseDesktop(
                 tracker.advance();
                 desktop.size = try parseVector(tracker, "size");
             },
+            .background => {
+                tracker.advance();
+                desktop.background = try parseColor(tracker);
+            },
             .nodes => {
                 tracker.advance();
                 const all_nodes = try parseNodeArray(tracker, Vector{ .x = 0, .y = 0 });
@@ -770,6 +774,7 @@ fn initDesktop() types.Desktop {
     return types.Desktop{
         .active_workspace = null,
         .size = types.Vector{ .x = 0, .y = 0 },
+        .background = null,
         .nodes = null,
         .workspaces = null,
     };

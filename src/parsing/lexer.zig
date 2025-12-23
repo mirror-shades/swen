@@ -1,6 +1,7 @@
 const std = @import("std");
 const types = @import("../core/types.zig");
 const Token = types.Token;
+const Span = types.Span;
 const memory = @import("../core/memory.zig");
 const helpers = @import("../utils/helpers.zig");
 const reporter = @import("../utils/reporter.zig");

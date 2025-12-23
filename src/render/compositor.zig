@@ -213,6 +213,8 @@ pub const Compositor = struct {
     }
 
     pub fn renderIRFrame(self: *Compositor, ir: []const Instruction) void {
+        // Ensure full clear with explicit background color
+        _ = c.SDL_SetRenderDrawColor(self.renderer, 0, 0, 0, 255);
         _ = c.SDL_RenderClear(self.renderer);
 
         for (ir) |inst| {
@@ -396,28 +398,6 @@ pub fn collectRectsFromRoot(
 
     rect_buffer.length = 0;
     collectDesktopRects(root.desktop, rect_buffer);
-}
-
-pub fn renderIRFrame(self: *Compositor, ir: []const Instruction) void {
-    _ = c.SDL_RenderClear(self.renderer);
-
-    for (ir) |inst| {
-        switch (inst) {
-            .draw_rect => |dr| {
-                self.drawRectFilled(dr.bounds.x, dr.bounds.y, dr.bounds.width, dr.bounds.height, dr.color);
-            },
-            .draw_text => |dt| {
-                const text_slice = switch (dt.text) {
-                    .inline_text => |inline_text| inline_text.data[0..inline_text.len],
-                    .interned => |_| @as([]const u8, &[_]u8{}),
-                };
-                self.drawText(dt.bounds.x, dt.bounds.y, dt.color, text_slice, dt.text_size);
-            },
-            else => {},
-        }
-    }
-
-    c.SDL_RenderPresent(self.renderer);
 }
 
 fn collectDesktopRects(
