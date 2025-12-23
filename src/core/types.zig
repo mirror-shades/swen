@@ -20,7 +20,7 @@ pub const Desktop = struct {
 };
 
 pub const Workspace = struct {
-    apps: ?[]App,
+    id: []const u8,
 };
 
 pub const System = struct {
@@ -268,29 +268,29 @@ pub fn makeToken(literal: []const u8, line: usize, column: usize, offset: usize)
     } else {
         const tag = try get_tag(literal);
         return Token{
-            .literal = literal,
-            .tag = tag,
-            .span = Span{
-                .line = line,
-                .column = column,
-                .offset = offset,
-            },
-        };
+                .literal = literal,
+                .tag = tag,
+                .span = Span{
+                    .line = line,
+                    .column = column,
+                    .offset = offset,
+                },
+            };
     }
 }
 
 pub fn makeNumberToken(line: usize, column: usize, offset: usize, potential_number: []const u8) !Token {
-    var is_float = false;
-    for (potential_number) |char| {
-        if (char == '.') {
-            if (is_float) {
-                return makeToken(potential_number, line, column, offset);
-            }
-            is_float = true;
-        }
-    }
-    const new_token = makeToken(potential_number, line, column, offset);
-    return new_token;
+    const is_float = helpers.isFloat(potential_number);
+
+    return Token{
+        .literal = potential_number,
+        .tag = if (is_float) .float else .int,
+        .span = Span{
+            .line = line,
+            .column = column,
+            .offset = offset,
+        },
+    };
 }
 
 pub const Bounds = struct {

@@ -213,7 +213,6 @@ pub const Compositor = struct {
     }
 
     pub fn renderIRFrame(self: *Compositor, ir: []const Instruction) void {
-        // Ensure full clear with explicit background color
         _ = c.SDL_SetRenderDrawColor(self.renderer, 0, 0, 0, 255);
         _ = c.SDL_RenderClear(self.renderer);
 

@@ -52,7 +52,8 @@ fn printWorkspaceSlice(label: []const u8, workspaces: []const types.Workspace, i
 }
 
 fn printWorkspace(workspace: types.Workspace, indent_level: usize) void {
-    printAppsSlice("apps", workspace.apps, indent_level);
+    printIndent(indent_level);
+    std.debug.print("id {s}\n", .{workspace.id});
 }
 
 fn printAppsSlice(label: []const u8, apps: ?[]const types.App, indent_level: usize) void {

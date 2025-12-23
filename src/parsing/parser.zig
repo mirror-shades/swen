@@ -55,17 +55,27 @@ pub fn parse(token_array: *memory.FixedArray(Token, 4096), nodes: *memory.FixedA
 
     var desktop = initDesktop();
     var system = initSystem();
+    var has_desktop = false;
+    var has_system = false;
 
     var closed = false;
     while (tracker.peek().tag != .eof) {
         switch (tracker.peek().tag) {
             .desktop => {
+                if (has_desktop) {
+                    return reporter.throwError("root node can only have one desktop child", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.DuplicateNode);
+                }
                 tracker.advance();
                 desktop = try parseDesktop(&tracker);
+                has_desktop = true;
             },
             .system => {
+                if (has_system) {
+                    return reporter.throwError("root node can only have one system child", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.DuplicateNode);
+                }
                 tracker.advance();
                 system = try parseSystem(&tracker);
+                has_system = true;
             },
             .rbrace => {
                 closed = true;
@@ -83,6 +93,14 @@ pub fn parse(token_array: *memory.FixedArray(Token, 4096), nodes: *memory.FixedA
         return reporter.throwError("expected closing brace after root declaration", root_token.span.line, root_token.span.column, root_token.span.offset, Error.ExpectedRightBrace);
     }
 
+    if (!has_desktop) {
+        return reporter.throwError("root node must have exactly one desktop child", root_token.span.line, root_token.span.column, root_token.span.offset, Error.MissingRequiredNode);
+    }
+
+    if (!has_system) {
+        return reporter.throwError("root node must have exactly one system child", root_token.span.line, root_token.span.column, root_token.span.offset, Error.MissingRequiredNode);
+    }
+
     return types.Root{
         .desktop = desktop,
         .system = system,
@@ -97,6 +115,10 @@ fn parseDesktop(
     }
 
     var desktop = initDesktop();
+    var has_size = false;
+    var has_background = false;
+    var has_nodes = false;
+    var has_workspaces = false;
     var closed = false;
     while (tracker.peek().tag != .eof) {
         const token = tracker.peek();
@@ -104,10 +126,12 @@ fn parseDesktop(
             .size => {
                 tracker.advance();
                 desktop.size = try parseVector(tracker, "size");
+                has_size = true;
             },
             .background => {
                 tracker.advance();
                 desktop.background = try parseColor(tracker);
+                has_background = true;
             },
             .nodes => {
                 tracker.advance();
@@ -180,11 +204,13 @@ fn parseDesktop(
                 }
 
                 desktop.nodes = root_nodes;
+                has_nodes = true;
             },
             .workspaces => {
                 tracker.advance();
-                const workspaces_slice = try parseWorkspaceArray(tracker.tokens, tracker, token);
+                const workspaces_slice = try parseWorkspaceArray(tracker, token);
                 desktop.workspaces = workspaces_slice;
+                has_workspaces = true;
             },
             .rbrace => {
                 closed = true;
@@ -200,6 +226,20 @@ fn parseDesktop(
 
     if (!closed) {
         return reporter.throwError("expected closing brace after desktop declaration", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedRightBrace);
+    }
+
+    // Validate required properties
+    if (!has_size) {
+        return reporter.throwError("desktop node must have a size property", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
+    }
+    if (!has_background) {
+        return reporter.throwError("desktop node must have a background property", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
+    }
+    if (!has_nodes) {
+        return reporter.throwError("desktop node must have a nodes array", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
+    }
+    if (!has_workspaces) {
+        return reporter.throwError("desktop node must have a workspaces array", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
     }
 
     if (desktop.size.x <= 0 or desktop.size.y <= 0) {
@@ -284,7 +324,6 @@ fn parseNodeArray(tracker: *TokenTracker, local_position: Vector) Error![]types.
 }
 
 fn parseWorkspaceArray(
-    tokens: *memory.FixedArray(Token, 4096),
     tracker: *TokenTracker,
     workspaces_token: Token,
 ) ![]types.Workspace {
@@ -292,26 +331,75 @@ fn parseWorkspaceArray(
         return reporter.throwError("expected opening bracket after workspaces keyword", workspaces_token.span.line, workspaces_token.span.column, workspaces_token.span.offset, Error.ExpectedLeftBracket);
     }
 
-    var depth: usize = 1;
-    while (tracker.index < tokens.getLength() and depth > 0) {
+    var workspaces = try std.ArrayList(types.Workspace).initCapacity(std.heap.page_allocator, 0);
+    defer workspaces.deinit(std.heap.page_allocator);
+
+    var closed = false;
+    while (tracker.peek().tag != .eof) {
         const token = tracker.peek();
-        if (token.tag == .lbracket) {
-            depth += 1;
-        } else if (token.tag == .rbracket) {
-            depth -= 1;
-            if (depth == 0) {
+        switch (token.tag) {
+            .lbrace => {
+                tracker.advance();
+                const workspace = try parseWorkspaceObject(tracker);
+                try workspaces.append(std.heap.page_allocator, workspace);
+            },
+            .rbracket => {
+                closed = true;
                 tracker.advance();
                 break;
-            }
+            },
+            else => {
+                std.debug.print("unexpected token found in workspace array parsing at line {d} column {d} offset {d}: {t} {s}\n", .{ token.span.line, token.span.column, token.span.offset, token.tag, token.literal });
+                tracker.advance();
+            },
         }
-        tracker.advance();
     }
 
-    if (depth != 0) {
+    if (!closed) {
         return reporter.throwError("expected closing bracket after workspaces declaration", workspaces_token.span.line, workspaces_token.span.column, workspaces_token.span.offset, Error.ExpectedRightBracket);
     }
 
-    return &[_]types.Workspace{};
+    return try workspaces.toOwnedSlice(std.heap.page_allocator);
+}
+
+fn parseWorkspaceObject(tracker: *TokenTracker) !types.Workspace {
+    var workspace: types.Workspace = undefined;
+    var has_id = false;
+    var closed = false;
+
+    while (tracker.peek().tag != .eof) {
+        const token = tracker.peek();
+        switch (token.tag) {
+            .id => {
+                tracker.advance();
+                if (tracker.peek().tag != .identifier) {
+                    return reporter.throwError("expected identifier after id keyword in workspace", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedIdentifier);
+                }
+                workspace.id = tracker.peek().literal;
+                tracker.advance();
+                has_id = true;
+            },
+            .rbrace => {
+                closed = true;
+                tracker.advance();
+                break;
+            },
+            else => {
+                std.debug.print("unexpected token found in workspace object parsing at line {d} column {d} offset {d}: {t} {s}\n", .{ token.span.line, token.span.column, token.span.offset, token.tag, token.literal });
+                tracker.advance();
+            },
+        }
+    }
+
+    if (!closed) {
+        return reporter.throwError("expected closing brace after workspace object", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.ExpectedRightBrace);
+    }
+
+    if (!has_id) {
+        return reporter.throwError("workspace object must have an id property", tracker.peek().span.line, tracker.peek().span.column, tracker.peek().span.offset, Error.MissingProperty);
+    }
+
+    return workspace;
 }
 
 fn parseRectBody(tracker: *TokenTracker, local_position: Vector) Error!Rect {

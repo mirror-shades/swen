@@ -22,6 +22,9 @@ pub const Error = error{
     InvalidBackground,
     ExpectedColor,
     InvalidMatrix,
+    DuplicateNode,
+    MissingRequiredNode,
+    OutOfMemory,
     // runtime
     InvalidSurfaceSize,
     FontUnavailable,
