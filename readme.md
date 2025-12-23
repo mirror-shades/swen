@@ -13,7 +13,7 @@ The backend takes a hybrid approach: **the CPU does scheduling/allocation**, and
 
 ## Architecture
 
-The compositor reads a form of markup written as a .swen file. This is parsed into an AST and made into a global scene tree much like Flutter. When an app is launched which provides a .swen file, it is parsed and inserted into the scene tree. The apps UI is sandboxed from writing to other apps, and is limited to receiving events which are explicitly requested within its scene tree. Apps communicate changes to the scene tree via **patch ops** (high-level operations like `SetText`, `SetPosition`, etc.), which are distinct from the compositor's internal **render IR** (low-level rendering instructions used for tile-based GPU rendering).
+The compositor reads a form of markup written as a .swen file. This is parsed into an scene tree and made into a global scene tree much like Flutter. When an app is launched which provides a .swen file, it is parsed and inserted into the scene tree. The apps UI is sandboxed from writing to other apps, and is limited to receiving events which are explicitly requested within its scene tree. Apps communicate changes to the scene tree via **patch ops** (high-level operations like `SetText`, `SetPosition`, etc.), which are distinct from the compositor's internal **render IR** (low-level rendering instructions used for tile-based GPU rendering).
 
 ## Pipeline (end-to-end)
 
