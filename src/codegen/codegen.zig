@@ -3,8 +3,6 @@ const memory = @import("../core/memory.zig");
 const types = @import("../core/types.zig");
 const render_ir = @import("ir.zig");
 
-// Global render IR buffer reused across frames to avoid large
-// stack allocations and to support future reactive updates.
 var global_ir_buf: render_ir.IRBuffer = render_ir.IRBuffer.init();
 
 pub fn generate(root: *types.Root, ir_array: *memory.IRArray) !void {
@@ -12,13 +10,8 @@ pub fn generate(root: *types.Root, ir_array: *memory.IRArray) !void {
         return error.NoActiveWorkspace;
     }
 
-    // Lower the desktop scene to the new render IR and then
-    // adapt it into the existing backend-agnostic Instruction IR
-    // used by the compositor today.
     try render_ir.lowerDesktop(&global_ir_buf, root.desktop);
 
-    // Reset destination IR array and populate it from the
-    // higher-fidelity IRInstruction stream.
     ir_array.length = 0;
 
     const instructions = global_ir_buf.getInstructions();

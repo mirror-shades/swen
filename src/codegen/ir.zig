@@ -1,43 +1,14 @@
-//! Render IR - Compositor-internal intermediate representation for tile-based GPU rendering.
-//!
-//! This module implements the render IR layer as described in the architecture:
-//! - Scene tree → IR lowering (stable IDs, bounds, paint/clip state)
-//! - Tile scheduling (bin, sort, merge, classify)
-//! - GPU-friendly output (bounded buffers, flush on overflow)
-//!
-//! The IR is distinct from patch ops: patch ops are app-facing high-level operations
-//! that modify the scene tree, while render IR is compositor-internal and designed
-//! for incremental, tile-based rendering.
-
 const std = @import("std");
 const types = @import("../core/types.zig");
 const memory = @import("../core/memory.zig");
 const reporter = @import("../utils/reporter.zig");
 
-// ============================================================================
-// Configuration Constants
-// ============================================================================
-
-/// Fixed tile size in pixels (power of 2 for efficient GPU work distribution)
 pub const TILE_SIZE: u32 = 16;
-
-/// Maximum number of segments per tile before splitting
 pub const MAX_SEGMENTS_PER_TILE: u32 = 256;
-
-/// Maximum GPU buffer size in bytes before flush
-pub const MAX_GPU_BUFFER_SIZE: usize = 4 * 1024 * 1024; // 4MB
-
-/// Maximum tiles per frame (for bounded memory)
+pub const MAX_GPU_BUFFER_SIZE: usize = 4 * 1024 * 1024;
 pub const MAX_TILES_PER_FRAME: usize = 16384;
-
-/// Maximum instructions in IR buffer
 pub const MAX_IR_INSTRUCTIONS: usize = 65536;
 
-// ============================================================================
-// Core IR Types
-// ============================================================================
-
-/// Tile coordinate in tile-space (not pixel-space)
 pub const TileCoord = struct {
     x: u16,
     y: u16,
@@ -63,40 +34,30 @@ pub const TileCoord = struct {
         return self.x == other.x and self.y == other.y;
     }
 
-    /// Pack into u32 for hashing/sorting
     pub fn pack(self: TileCoord) u32 {
         return (@as(u32, self.y) << 16) | @as(u32, self.x);
     }
 };
 
-/// Unique tile identifier combining coordinate and layer
 pub const TileId = struct {
     coord: TileCoord,
-    layer: u8, // for z-ordering / compositor layers
+    layer: u8,
 
     pub fn pack(self: TileId) u64 {
         return (@as(u64, self.layer) << 32) | @as(u64, self.coord.pack());
     }
 };
 
-/// Classification of a tile for rendering optimization
 pub const TileClassification = enum(u8) {
-    /// Tile is completely outside all geometry - skip entirely
     empty,
-    /// Tile is completely inside a solid region - fast-path fill
     solid,
-    /// Tile contains edges requiring coverage computation
     edge,
-    /// Tile is completely clipped out
     clipped,
-    /// Tile requires full blend pipeline (multiple overlapping elements)
     complex,
 };
 
-/// Paint key for caching - uniquely identifies a fill/stroke style
 pub const PaintKey = struct {
     color: types.Color,
-    // Future: gradient_id, pattern_id, etc.
 
     pub fn hash(self: PaintKey) u64 {
         return @as(u64, self.color.r) |
@@ -113,10 +74,8 @@ pub const PaintKey = struct {
     }
 };
 
-/// Clip key for caching - uniquely identifies a clip region
 pub const ClipKey = struct {
     bounds: types.Bounds,
-    // Future: path_hash for complex clip shapes
 
     pub fn hash(self: ClipKey) u64 {
         const x: u64 = @bitCast(@as(i64, self.bounds.x));
@@ -125,72 +84,48 @@ pub const ClipKey = struct {
     }
 };
 
-/// Line segment for GPU rasterization (tile-clipped)
 pub const Segment = struct {
-    /// Start point relative to tile origin (in 8.8 fixed point for sub-pixel precision)
     x0: i16,
     y0: i16,
-    /// End point relative to tile origin
     x1: i16,
     y1: i16,
-    /// Winding direction for fill rule
     winding: i8,
-    /// Padding for alignment
     _pad: [3]u8 = .{ 0, 0, 0 },
 };
 
-/// Per-tile work record for GPU submission
 pub const TileWork = struct {
-    /// Tile coordinate
     coord: TileCoord,
-    /// Classification determines rendering path
     classification: TileClassification,
-    /// For solid tiles: the fill color
     solid_color: types.Color,
-    /// Index into segment buffer (for edge tiles)
     segment_start: u32,
-    /// Number of segments in this tile
     segment_count: u16,
-    /// Clip state index (0 = no clip)
     clip_index: u16,
-    /// Paint state index
     paint_index: u16,
-    /// Z-order for compositing
     z_order: u16,
 };
 
-/// Dirty region tracking for incremental updates
 pub const DirtyRegion = struct {
     bounds: types.Bounds,
-    /// Which node caused the dirty (for debugging/profiling)
-    source_node: types.NodeId,
-    /// Frame number when marked dirty
+    source_node: u64,
     frame: u64,
 };
 
-// ============================================================================
-// IR Instructions (Extended from types.zig Instruction)
-// ============================================================================
-
-/// Extended IR instruction set for tile-based rendering
 pub const IRInstruction = union(enum) {
-    // === Geometry Commands ===
     draw_rect: struct {
-        node_id: types.NodeId,
+        node_id: u64,
         bounds: types.Bounds,
         paint_key: PaintKey,
         corner_radius: u16 = 0,
     },
 
     draw_text: struct {
-        node_id: types.NodeId,
+        node_id: u64,
         bounds: types.Bounds,
         text_ref: types.TextRef,
         paint_key: PaintKey,
         text_size: u16,
     },
 
-    // === State Stack Commands ===
     push_state,
     pop_state,
 
@@ -198,77 +133,50 @@ pub const IRInstruction = union(enum) {
         matrix: types.Matrix,
     },
 
-    // === Clip Commands ===
     begin_clip: struct {
-        clip_id: types.NodeId,
+        clip_id: u64,
         bounds: types.Bounds,
         clip_key: ClipKey,
     },
 
     end_clip,
 
-    // === Cache Hints ===
     begin_cache_group: struct {
-        group_id: types.NodeId,
+        group_id: u64,
         bounds: types.Bounds,
-        content_hash: u64, // Hash of subtree for cache invalidation
+        content_hash: u64,
     },
 
     end_cache_group,
 
-    // === Tile Hints ===
-    /// Hint that following instructions affect only these tiles
     tile_hint: struct {
         start_tile: TileCoord,
-        end_tile: TileCoord, // Exclusive
+        end_tile: TileCoord,
     },
 
-    /// Marker for tile boundary (aids in binning)
     tile_boundary: TileCoord,
 
     nop,
 };
 
-// ============================================================================
-// Frame Snapshot - Immutable frame state for rendering
-// ============================================================================
-
-/// Immutable snapshot of a frame ready for GPU submission
 pub const FrameSnapshot = struct {
-    /// Frame sequence number
     frame_number: u64,
-
-    /// Viewport size in pixels
     viewport_width: u32,
     viewport_height: u32,
 
-    /// Tile grid dimensions
     tiles_x: u16,
     tiles_y: u16,
 
-    // === For immediate-mode backends (e.g., Pathfinder) ===
-
-    /// Original IR instructions - use this for backends that don't support tile rendering
     instructions: []const IRInstruction,
 
-    // === For tile-based backends (e.g., native GPU) ===
-
-    /// Tile work buffer (sorted by tile coord for cache locality)
     tile_work: []const TileWork,
 
-    /// Segment buffer (referenced by tile_work)
     segments: []const Segment,
-
-    /// Paint table (indexed by paint_index in TileWork)
     paint_table: []const PaintKey,
 
-    /// Clip table (indexed by clip_index in TileWork)
     clip_table: []const ClipKey,
-
-    /// Dirty regions from this frame (for partial update optimization)
     dirty_regions: []const DirtyRegion,
 
-    /// Statistics for profiling
     stats: FrameStats,
 };
 
@@ -283,20 +191,12 @@ pub const FrameStats = struct {
     cache_misses: u32 = 0,
 };
 
-// ============================================================================
-// IR Buffer - Mutable buffer for building IR
-// ============================================================================
-
-/// Mutable buffer for accumulating IR instructions during scene lowering
 pub const IRBuffer = struct {
     instructions: [MAX_IR_INSTRUCTIONS]IRInstruction,
     length: usize,
     frame_number: u64,
 
-    /// Current transform stack depth
     state_depth: u32,
-
-    /// Current clip stack
     clip_stack: [32]ClipKey,
     clip_depth: u8,
 
@@ -332,7 +232,7 @@ pub const IRBuffer = struct {
 
     pub fn emitRect(
         self: *IRBuffer,
-        node_id: types.NodeId,
+        node_id: u64,
         bounds: types.Bounds,
         color: types.Color,
         corner_radius: u16,
@@ -349,7 +249,7 @@ pub const IRBuffer = struct {
 
     pub fn emitText(
         self: *IRBuffer,
-        node_id: types.NodeId,
+        node_id: u64,
         bounds: types.Bounds,
         text_ref: types.TextRef,
         color: types.Color,
@@ -379,7 +279,7 @@ pub const IRBuffer = struct {
         self.state_depth -= 1;
     }
 
-    pub fn beginClip(self: *IRBuffer, clip_id: types.NodeId, bounds: types.Bounds) !void {
+    pub fn beginClip(self: *IRBuffer, clip_id: u64, bounds: types.Bounds) !void {
         if (self.clip_depth >= 32) {
             return error.ClipStackOverflow;
         }
@@ -413,36 +313,24 @@ pub const IRBuffer = struct {
     }
 };
 
-// ============================================================================
-// Tile Scheduler
-// ============================================================================
-
-/// Tile scheduler: bins IR instructions into tiles, sorts, merges, and classifies
 pub const TileScheduler = struct {
-    /// Tile work output buffer
     tile_work: [MAX_TILES_PER_FRAME]TileWork,
     tile_count: usize,
 
-    /// Segment output buffer
-    segments: [MAX_TILES_PER_FRAME * 16]Segment, // Average 16 segments per tile
+    segments: [MAX_TILES_PER_FRAME * 16]Segment,
     segment_count: usize,
 
-    /// Paint deduplication table
     paint_table: [1024]PaintKey,
     paint_count: usize,
 
-    /// Clip deduplication table
     clip_table: [256]ClipKey,
     clip_count: usize,
 
-    /// Dirty region accumulator
     dirty_regions: [256]DirtyRegion,
     dirty_count: usize,
 
-    /// Frame stats
     stats: FrameStats,
 
-    /// Viewport dimensions
     viewport_width: u32,
     viewport_height: u32,
     tiles_x: u16,
@@ -484,25 +372,18 @@ pub const TileScheduler = struct {
         self.tiles_y = @intCast((height + TILE_SIZE - 1) / TILE_SIZE);
     }
 
-    /// Main entry point: process IR buffer and produce tile work
     pub fn schedule(self: *TileScheduler, ir: *const IRBuffer) !void {
         self.reset();
 
-        // Phase 1: Bin - assign instructions to tiles
         try self.binInstructions(ir);
 
-        // Phase 2: Sort - sort tile work by tile coordinate for cache locality
         self.sortTileWork();
 
-        // Phase 3: Merge - combine adjacent compatible tiles where beneficial
         self.mergeTiles();
 
-        // Phase 4: Classify - determine rendering path for each tile
         self.classifyTiles();
     }
 
-    /// Produce immutable frame snapshot
-    /// Pass the IR buffer to include original instructions for immediate-mode backends
     pub fn buildSnapshot(self: *const TileScheduler, ir_buf: *const IRBuffer) FrameSnapshot {
         return .{
             .frame_number = ir_buf.frame_number,
@@ -520,8 +401,6 @@ pub const TileScheduler = struct {
         };
     }
 
-    // === Phase 1: Binning ===
-
     fn binInstructions(self: *TileScheduler, ir: *const IRBuffer) !void {
         for (ir.getInstructions()) |instr| {
             switch (instr) {
@@ -538,21 +417,18 @@ pub const TileScheduler = struct {
 
     fn binRect(
         self: *TileScheduler,
-        node_id: types.NodeId,
+        node_id: u64,
         bounds: types.Bounds,
         paint_key: PaintKey,
     ) !void {
-        // Get or add paint to table
         const paint_index = try self.getOrAddPaint(paint_key);
 
-        // Calculate which tiles this rect covers
         const start = TileCoord.fromPixel(bounds.x, bounds.y);
         const end = TileCoord.fromPixel(
             bounds.x + bounds.width - 1,
             bounds.y + bounds.height - 1,
         );
 
-        // Emit tile work for each covered tile
         var ty = start.y;
         while (ty <= end.y) : (ty += 1) {
             var tx = start.x;
@@ -560,7 +436,6 @@ pub const TileScheduler = struct {
                 const coord = TileCoord{ .x = tx, .y = ty };
                 const tile_bounds = coord.toPixelBounds();
 
-                // Determine if tile is fully covered (solid) or edge
                 const is_solid = bounds.x <= tile_bounds.x and
                     bounds.y <= tile_bounds.y and
                     bounds.x + bounds.width >= tile_bounds.x + tile_bounds.width and
@@ -606,10 +481,7 @@ pub const TileScheduler = struct {
         return @intCast(index);
     }
 
-    // === Phase 2: Sorting ===
-
     fn sortTileWork(self: *TileScheduler) void {
-        // Sort by tile coordinate (packed) for cache-friendly GPU access
         const tile_slice = self.tile_work[0..self.tile_count];
         std.mem.sort(TileWork, tile_slice, {}, struct {
             fn lessThan(_: void, a: TileWork, b: TileWork) bool {
@@ -621,11 +493,7 @@ pub const TileScheduler = struct {
         }.lessThan);
     }
 
-    // === Phase 3: Merging ===
-
     fn mergeTiles(self: *TileScheduler) void {
-        // Merge consecutive tiles at the same coord with the same paint
-        // (keep highest z-order, or composite if needed)
         if (self.tile_count < 2) return;
 
         var write_idx: usize = 0;
@@ -635,13 +503,11 @@ pub const TileScheduler = struct {
             const prev = &self.tile_work[write_idx];
             const curr = self.tile_work[read_idx];
 
-            // Can merge if same tile coord and both solid with same opaque color
             if (prev.coord.eql(curr.coord) and
                 prev.classification == .solid and
                 curr.classification == .solid and
                 curr.solid_color.a == 255)
             {
-                // Later solid opaque overwrites earlier
                 prev.* = curr;
             } else {
                 write_idx += 1;
@@ -652,8 +518,6 @@ pub const TileScheduler = struct {
         }
         self.tile_count = write_idx + 1;
     }
-
-    // === Phase 4: Classification ===
 
     fn classifyTiles(self: *TileScheduler) void {
         for (self.tile_work[0..self.tile_count]) |*tile| {
@@ -669,8 +533,7 @@ pub const TileScheduler = struct {
         self.stats.total_segments = @intCast(self.segment_count);
     }
 
-    /// Mark a region as dirty (for incremental updates)
-    pub fn markDirty(self: *TileScheduler, bounds: types.Bounds, source_node: types.NodeId, frame: u64) void {
+    pub fn markDirty(self: *TileScheduler, bounds: types.Bounds, source_node: u64, frame: u64) void {
         if (self.dirty_count >= 256) return;
         self.dirty_regions[self.dirty_count] = .{
             .bounds = bounds,
@@ -681,17 +544,11 @@ pub const TileScheduler = struct {
     }
 };
 
-// ============================================================================
-// Scene Lowering - Convert scene tree to IR
-// ============================================================================
-
-/// Error type alias for IR operations (uses central error set)
 pub const IRError = reporter.Error || error{
     IRBufferOverflow,
     StateStackUnderflow,
 };
 
-/// Lower a scene tree node to IR instructions
 pub fn lowerNode(ir_buf: *IRBuffer, node: types.Node, parent_pos: types.Vector) IRError!void {
     switch (node) {
         .rect => |rect| try lowerRect(ir_buf, rect, parent_pos),
@@ -716,7 +573,6 @@ fn lowerRect(ir_buf: *IRBuffer, rect: types.Rect, parent_pos: types.Vector) IREr
         try ir_buf.emitRect(node_id, bounds, bg, 0);
     }
 
-    // Recurse into children
     if (rect.children) |children| {
         const child_pos = types.Vector{ .x = world_x, .y = world_y };
         for (children) |child| {
@@ -730,7 +586,6 @@ fn lowerText(ir_buf: *IRBuffer, text: types.Text, parent_pos: types.Vector) IREr
     const world_x = text.local_position.x + pos.x + parent_pos.x;
     const world_y = text.local_position.y + pos.y + parent_pos.y;
 
-    // Estimate text bounds (proper implementation would use font metrics)
     const text_size: i32 = @intCast(text.text_size orelse 14);
     const estimated_width: i32 = @intCast(text.body.len * @as(usize, @intCast(text_size)) / 2);
 
@@ -764,7 +619,6 @@ fn lowerTransform(ir_buf: *IRBuffer, transform: types.Transform, parent_pos: typ
     }
 }
 
-/// Lower entire desktop to IR
 pub fn lowerDesktop(ir_buf: *IRBuffer, desktop: types.Desktop) IRError!void {
     ir_buf.nextFrame();
 
@@ -776,20 +630,14 @@ pub fn lowerDesktop(ir_buf: *IRBuffer, desktop: types.Desktop) IRError!void {
     }
 }
 
-// ============================================================================
-// Helpers
-// ============================================================================
-
-fn generateNodeId(id_opt: ?[]const u8) types.NodeId {
+fn generateNodeId(id_opt: ?[]const u8) u64 {
     if (id_opt) |id| {
-        // Simple hash of string ID
         var hash: u64 = 5381;
         for (id) |c| {
             hash = ((hash << 5) +% hash) +% c;
         }
         return hash;
     }
-    // Generate unique ID from address (not stable across frames - just for anonymous nodes)
     return 0;
 }
 
@@ -816,33 +664,18 @@ fn makeTextRef(body: []const u8) types.TextRef {
     };
 }
 
-// ============================================================================
-// GPU Buffer Types (for OpenGL submission)
-// ============================================================================
-
-/// GPU-side tile work record (packed for SSBO)
 pub const GPUTileWork = extern struct {
-    /// Tile X coordinate
     tile_x: u16,
-    /// Tile Y coordinate
     tile_y: u16,
-    /// Classification (see TileClassification)
     classification: u8,
-    /// Padding
     _pad0: [3]u8 = .{ 0, 0, 0 },
-    /// Solid color (RGBA8)
     color: [4]u8,
-    /// Segment slice start
     segment_start: u32,
-    /// Segment count
     segment_count: u32,
-    /// Paint index
     paint_index: u16,
-    /// Clip index
     clip_index: u16,
 };
 
-/// GPU-side segment (packed for SSBO)
 pub const GPUSegment = extern struct {
     x0: i16,
     y0: i16,
@@ -852,7 +685,6 @@ pub const GPUSegment = extern struct {
     _pad: [3]u8 = .{ 0, 0, 0 },
 };
 
-/// Convert TileWork to GPU format
 pub fn tileWorkToGPU(work: TileWork) GPUTileWork {
     return .{
         .tile_x = work.coord.x,
@@ -864,40 +696,4 @@ pub fn tileWorkToGPU(work: TileWork) GPUTileWork {
         .paint_index = work.paint_index,
         .clip_index = work.clip_index,
     };
-}
-
-// ============================================================================
-// Tests
-// ============================================================================
-
-test "TileCoord.fromPixel" {
-    const coord = TileCoord.fromPixel(35, 50);
-    try std.testing.expectEqual(@as(u16, 2), coord.x);
-    try std.testing.expectEqual(@as(u16, 3), coord.y);
-}
-
-test "TileCoord.toPixelBounds" {
-    const coord = TileCoord{ .x = 2, .y = 3 };
-    const bounds = coord.toPixelBounds();
-    try std.testing.expectEqual(@as(i32, 32), bounds.x);
-    try std.testing.expectEqual(@as(i32, 48), bounds.y);
-    try std.testing.expectEqual(@as(i32, 16), bounds.width);
-    try std.testing.expectEqual(@as(i32, 16), bounds.height);
-}
-
-test "IRBuffer basic emit" {
-    var ir = IRBuffer.init();
-    try ir.emitRect(1, .{ .x = 0, .y = 0, .width = 100, .height = 100 }, .{ .r = 255, .g = 0, .b = 0, .a = 255 }, 0);
-    try std.testing.expectEqual(@as(usize, 1), ir.length);
-}
-
-test "TileScheduler basic schedule" {
-    var ir = IRBuffer.init();
-    try ir.emitRect(1, .{ .x = 0, .y = 0, .width = 32, .height = 32 }, .{ .r = 255, .g = 0, .b = 0, .a = 255 }, 0);
-
-    var scheduler = TileScheduler.init();
-    scheduler.setViewport(1024, 768);
-    try scheduler.schedule(&ir);
-
-    try std.testing.expect(scheduler.tile_count > 0);
 }

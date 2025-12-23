@@ -34,11 +34,8 @@ pub const App = struct {
     children: []Node,
 };
 
-/// Stable identifier for scene nodes. Used for caching, diffing, and patch targeting.
-pub const NodeId = u64;
-
 pub const Rect = struct {
-    node_id: NodeId,
+    node_id: u64,
     id: ?[]const u8,
     size: Vector,
     position: ?Vector,
@@ -48,7 +45,7 @@ pub const Rect = struct {
 };
 
 pub const Transform = struct {
-    node_id: NodeId,
+    node_id: u64,
     id: ?[]const u8,
     position: ?Vector,
     local_position: Vector,
@@ -57,7 +54,7 @@ pub const Transform = struct {
 };
 
 pub const Text = struct {
-    node_id: NodeId,
+    node_id: u64,
     id: ?[]const u8,
     body: []const u8,
     color: Color,
@@ -295,7 +292,6 @@ pub fn makeNumberToken(line: usize, column: usize, offset: usize, potential_numb
     return new_token;
 }
 
-/// Axis-aligned bounding box for dirty-rect tracking and tile scheduling.
 pub const Bounds = struct {
     x: i32,
     y: i32,
@@ -323,64 +319,49 @@ pub const Bounds = struct {
     }
 };
 
-/// Text reference that can be either inline (short strings) or a stable index
-/// into an interned string table (for longer/repeated strings).
 pub const TextRef = union(enum) {
     inline_text: struct {
         data: [64]u8,
         len: u8,
     },
-    interned: u32, // index into string table
+    interned: u32,
 };
 
-/// Backend-agnostic render instruction.
-/// Designed for incremental/tile-based rendering with caching support.
 pub const Instruction = union(enum) {
     draw_rect: struct {
-        node_id: NodeId, // stable id for caching/diffing
-        bounds: Bounds, // world-space AABB for dirty tracking
+        node_id: u64,
+        bounds: Bounds,
         color: Color,
-        corner_radius: u16 = 0, // future: rounded corners
+        corner_radius: u16 = 0,
     },
 
     draw_text: struct {
-        node_id: NodeId,
+        node_id: u64,
         bounds: Bounds,
         text: TextRef,
         color: Color,
         text_size: u16,
-        // future: font_id, alignment, etc.
     },
 
-    /// Push current transform/clip state onto stack.
     push_state,
-
-    /// Pop and restore previous transform/clip state.
     pop_state,
-
-    /// Set transform matrix (relative to current state).
     set_transform: struct {
         matrix: Matrix,
     },
 
-    /// Begin a clip region. All subsequent draws (until matching end_clip) are clipped.
     begin_clip: struct {
-        clip_id: NodeId, // for caching clip masks
+        clip_id: u64,
         bounds: Bounds,
     },
 
-    /// End the current clip region.
     end_clip,
 
-    /// Hint to renderer: the following N instructions are a cacheable group.
-    /// Backend can cache rasterized result keyed by group_id + content hash.
     begin_cache_group: struct {
-        group_id: NodeId,
+        group_id: u64,
         bounds: Bounds,
     },
 
     end_cache_group,
 
-    /// No-op / placeholder (useful for conditional compilation or debugging).
     nop,
 };

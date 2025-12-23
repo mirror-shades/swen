@@ -1,5 +1,4 @@
 pub fn isBreakChar(char: u8) bool {
-    // Treat carriage return as whitespace so CRLF line endings don't break lexing.
     return (char == ' ' or char == '\n' or char == '\r' or char == '\t' or isSymbol(char));
 }
 

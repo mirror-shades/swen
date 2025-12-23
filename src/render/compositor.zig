@@ -42,14 +42,12 @@ pub const Compositor = struct {
         };
         errdefer c.SDL_DestroyRenderer(renderer);
 
-        // Enable alpha blending so rect background alpha values are respected.
         _ = c.SDL_SetRenderDrawBlendMode(renderer, c.SDL_BLENDMODE_BLEND);
 
-        // Set background color if provided
         if (desktop_background) |bg| {
             _ = c.SDL_SetRenderDrawColor(renderer, bg.r, bg.g, bg.b, bg.a);
         } else {
-            _ = c.SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255); // Default black background
+            _ = c.SDL_SetRenderDrawColor(renderer, 0, 0, 0, 255);
         }
 
         return .{
@@ -65,19 +63,14 @@ pub const Compositor = struct {
     }
 
     pub fn renderScene(self: *Compositor, rects: []const Rect) !void {
-        // Clear the screen
         _ = c.SDL_RenderClear(self.renderer);
 
-        // Render all rectangles
         for (rects) |rect| {
             try self.renderRect(rect);
         }
 
-        // Present the rendered frame
         c.SDL_RenderPresent(self.renderer);
     }
-
-    // Additional SDL2 drawing primitives that can be used for custom rendering
 
     pub fn drawLine(self: *Compositor, x1: i32, y1: i32, x2: i32, y2: i32, color: Color) void {
         _ = c.SDL_SetRenderDrawColor(self.renderer, color.r, color.g, color.b, color.a);
@@ -151,7 +144,6 @@ pub const Compositor = struct {
                 self.drawGlyph(cursor_x, y, color, glyph, scale);
                 cursor_x += (5 * scale) + scale;
             } else {
-                // Fallback spacing for unsupported characters
                 cursor_x += (5 * scale) + scale;
             }
         }
@@ -170,22 +162,18 @@ pub const Compositor = struct {
             .h = rect.size.y,
         };
 
-        // Draw filled rectangle if background color is set
         if (rect.background) |background| {
             _ = c.SDL_SetRenderDrawColor(self.renderer, background.r, background.g, background.b, background.a);
             _ = c.SDL_RenderFillRect(self.renderer, &sdl_rect);
         }
 
-        // Draw rectangle outline (stroke) - thin black border for now
         _ = c.SDL_SetRenderDrawColor(self.renderer, 0, 0, 0, 255);
         _ = c.SDL_RenderDrawRect(self.renderer, &sdl_rect);
 
-        // Render children recursively
         if (rect.children) |children| {
             for (children) |child| {
                 switch (child) {
                     .rect => |child_rect| {
-                        // Create a modified rect with updated local position
                         var modified_rect = child_rect;
                         modified_rect.local_position.x += world_x;
                         modified_rect.local_position.y += world_y;
@@ -225,7 +213,6 @@ pub const Compositor = struct {
     }
 
     pub fn renderIRFrame(self: *Compositor, ir: []const Instruction) void {
-        // Clear the screen
         _ = c.SDL_RenderClear(self.renderer);
 
         for (ir) |inst| {
@@ -258,7 +245,6 @@ pub fn lowerSceneToIR(
         // start lowering from true roots.
         var is_child: [4096]bool = [_]bool{false} ** 4096;
 
-        // First pass: mark all child node ids.
         for (nodes) |node| {
             switch (node) {
                 .rect => |rect| {
@@ -293,7 +279,6 @@ pub fn lowerSceneToIR(
             }
         }
 
-        // Second pass: lower only true roots (not referenced as children).
         for (nodes) |node| {
             const id: types.NodeId = switch (node) {
                 .rect => |r| r.node_id,
@@ -414,7 +399,6 @@ pub fn collectRectsFromRoot(
 }
 
 pub fn renderIRFrame(self: *Compositor, ir: []const Instruction) void {
-    // Clear the screen
     _ = c.SDL_RenderClear(self.renderer);
 
     for (ir) |inst| {

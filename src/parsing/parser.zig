@@ -11,13 +11,12 @@ const Color = types.Color;
 const Vector = types.Vector;
 const Text = types.Text;
 const Rect = types.Rect;
-const NodeId = types.NodeId;
 
 const TokenTracker = struct {
     tokens: *memory.FixedArray(Token, 4096),
     nodes: *memory.FixedArray(Node, 4096),
     index: usize,
-    next_node_id: NodeId,
+    next_node_id: u64,
 
     pub fn init(tokens: *memory.FixedArray(Token, 4096), nodes: *memory.FixedArray(Node, 4096)) TokenTracker {
         return TokenTracker{
@@ -110,17 +109,14 @@ fn parseDesktop(
                 tracker.advance();
                 const all_nodes = try parseNodeArray(tracker, Vector{ .x = 0, .y = 0 });
 
-                // Build a pure tree for the desktop: ensure each node has exactly
-                // one parent by filtering out nodes that are referenced as children.
                 var is_child: [4096]bool = [_]bool{false} ** 4096;
 
-                // First pass: mark every node_id that appears as a child.
                 for (all_nodes) |node| {
                     switch (node) {
                         .rect => |rect| {
                             if (rect.children) |children| {
                                 for (children) |child| {
-                                    const child_id: NodeId = switch (child) {
+                                    const child_id: u64 = switch (child) {
                                         .rect => |r| r.node_id,
                                         .text => |t| t.node_id,
                                         .transform => |tr| tr.node_id,
@@ -134,7 +130,7 @@ fn parseDesktop(
                         .transform => |transform| {
                             if (transform.children) |children| {
                                 for (children) |child| {
-                                    const child_id: NodeId = switch (child) {
+                                    const child_id: u64 = switch (child) {
                                         .rect => |r| r.node_id,
                                         .text => |t| t.node_id,
                                         .transform => |tr| tr.node_id,
@@ -149,10 +145,9 @@ fn parseDesktop(
                     }
                 }
 
-                // Count root nodes (those not marked as children).
                 var root_count: usize = 0;
                 for (all_nodes) |node| {
-                    const id: NodeId = switch (node) {
+                    const id: u64 = switch (node) {
                         .rect => |r| r.node_id,
                         .text => |t| t.node_id,
                         .transform => |tr| tr.node_id,
@@ -169,7 +164,7 @@ fn parseDesktop(
 
                 var idx: usize = 0;
                 for (all_nodes) |node| {
-                    const id: NodeId = switch (node) {
+                    const id: u64 = switch (node) {
                         .rect => |r| r.node_id,
                         .text => |t| t.node_id,
                         .transform => |tr| tr.node_id,
@@ -333,7 +328,6 @@ fn parseRectBody(tracker: *TokenTracker, local_position: Vector) Error!Rect {
             },
             .id => {
                 tracker.advance();
-                // Accept any token literal as an id value (identifier, keyword, string, etc.)
                 rect.id = tracker.peek().literal;
                 tracker.advance();
             },
@@ -371,13 +365,12 @@ fn parseRectBody(tracker: *TokenTracker, local_position: Vector) Error!Rect {
 
                     var is_child: [4096]bool = [_]bool{false} ** 4096;
 
-                    // Mark all node_ids that appear as children within this slice.
                     for (all_nodes) |node| {
                         switch (node) {
                             .rect => |r| {
                                 if (r.children) |children| {
                                     for (children) |child| {
-                                        const child_id: NodeId = switch (child) {
+                                        const child_id: u64 = switch (child) {
                                             .rect => |cr| cr.node_id,
                                             .text => |ct| ct.node_id,
                                             .transform => |ctf| ctf.node_id,
@@ -391,7 +384,7 @@ fn parseRectBody(tracker: *TokenTracker, local_position: Vector) Error!Rect {
                             .transform => |t| {
                                 if (t.children) |children| {
                                     for (children) |child| {
-                                        const child_id: NodeId = switch (child) {
+                                        const child_id: u64 = switch (child) {
                                             .rect => |cr| cr.node_id,
                                             .text => |ct| ct.node_id,
                                             .transform => |ctf| ctf.node_id,
@@ -406,10 +399,9 @@ fn parseRectBody(tracker: *TokenTracker, local_position: Vector) Error!Rect {
                         }
                     }
 
-                    // Count direct children (nodes whose id is not marked as child).
                     var root_count: usize = 0;
                     for (all_nodes) |node| {
-                        const id: NodeId = switch (node) {
+                        const id: u64 = switch (node) {
                             .rect => |r| r.node_id,
                             .text => |t| t.node_id,
                             .transform => |tr| tr.node_id,
@@ -426,7 +418,7 @@ fn parseRectBody(tracker: *TokenTracker, local_position: Vector) Error!Rect {
 
                     var idx: usize = 0;
                     for (all_nodes) |node| {
-                        const id: NodeId = switch (node) {
+                        const id: u64 = switch (node) {
                             .rect => |r| r.node_id,
                             .text => |t| t.node_id,
                             .transform => |tr| tr.node_id,
@@ -502,7 +494,6 @@ fn parseTransform(tracker: *TokenTracker, local_position: Vector) !types.Transfo
             },
             .id => {
                 tracker.advance();
-                // Accept any token literal as an id value
                 transform.id = tracker.peek().literal;
                 tracker.advance();
             },
